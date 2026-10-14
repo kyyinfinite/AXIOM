@@ -1,0 +1,35 @@
+[agent]
+model = "groq/llama-3.3-70b-versatile"
+fallback = ["openai/gpt-4o-mini"]
+max_steps = 40
+temperature = 0.2
+system_prompt = ""
+
+[permissions]
+mode = "ask"
+workspace = "."
+
+[logging]
+level = "INFO"
+file = ""
+json = false
+
+[network]
+timeout_seconds = 120.0
+max_retries = 3
+local_only = false
+
+[tools]
+max_output_chars = 20000
+timeout_seconds = 120.0
+max_parallel_tools = 4
+
+[sandbox]
+backend = "container"
+runtime = "docker"
+image = "python:3.12-alpine"
+required = true
+network = false
+memory_mb = 1024
+cpu_limit = 1.0
+pids_limit = 128
