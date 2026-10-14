@@ -79,12 +79,12 @@ def test_validation_command_is_allowlisted_and_shell_free(tmp_path: Path) -> Non
 
 
 def test_phase5_tools_are_opt_in_and_multi_file_apply_requires_approval() -> None:
-    from axiom.coding.phase5_tools import phase5_tools
+    from axiom.coding.workflow_registry import workflow_tools
     from axiom.tools.builtin import default_registry
 
     legacy = default_registry()
     assert "index_project" not in legacy
-    tools = {tool.name: tool for tool in phase5_tools()}
+    tools = {tool.name: tool for tool in workflow_tools()}
     assert tools["apply_patchset"].mutates
     assert tools["apply_patchset"].requires_approval
     expanded = default_registry(include_phase4=True, include_phase5=True)
