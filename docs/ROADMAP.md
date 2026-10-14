@@ -6,7 +6,8 @@
 | Core | Configuration, logging, types, CLI foundation | Done |
 | Providers | OpenAI-compatible, Anthropic, Gemini, streaming, retry, fallback | Done |
 | Agent runtime | Agent loop, tool registry, approval hooks, concurrent tool execution | Implemented |
-| Sandbox | Container isolation and resource limits | Implemented; host validation remains |
+| Learning | Lessons from finished tasks, approval, prompt injection, eval harness | Implemented; skills pending |
+| Sandbox | Container isolation and resource limits | Container isolation implemented; opt-in host mode for Termux |
 | Sessions and memory | SQLite sessions and FTS5-backed memory | Implemented |
 | Coding workflow | Workspace tools, planning, patch previews, multi-file patchsets | Implemented |
 | Skills and routing | Skills and hybrid local/cloud model routing | Planned |

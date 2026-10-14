@@ -4,6 +4,12 @@ fallback = ["openai/gpt-4o-mini"]
 max_steps = 40
 temperature = 0.2
 system_prompt = ""
+context_tokens = 32000
+
+[learning]
+mode = "ask"
+lessons_in_prompt = 5
+max_lessons = 500
 
 [permissions]
 mode = "ask"

@@ -5,7 +5,7 @@ from typing import Literal
 
 from axiom.models import ToolCall, ToolResult, Usage
 
-AgentEventKind = Literal["step", "text", "tool_call", "tool_result", "done"]
+AgentEventKind = Literal["step", "text", "tool_call", "tool_result", "done", "lesson"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +33,10 @@ class AgentEvent:
     @classmethod
     def tool_finished(cls, result: ToolResult) -> AgentEvent:
         return cls("tool_result", tool_result=result)
+
+    @classmethod
+    def lesson_saved(cls, text: str) -> AgentEvent:
+        return cls("lesson", text=text)
 
     @classmethod
     def finished(cls, stop_reason: str, usage: Usage) -> AgentEvent:

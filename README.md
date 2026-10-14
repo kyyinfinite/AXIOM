@@ -1,8 +1,8 @@
 # AXIOM
 
-Provider-agnostic AI coding agent that works in your terminal: shell, files, skills and MCP tools, with OpenAI, Anthropic, Gemini, Groq, NVIDIA NIM and any OpenAI-compatible endpoint.
+Provider-agnostic AI coding agent that works in your terminal: shell, files, patches and test runs, with OpenAI, Anthropic, Gemini, Groq, NVIDIA NIM and any OpenAI-compatible endpoint.
 
-> Status: pre-alpha. Includes workspace coding tools, bounded task planning, and categorized persistent memory. Sandbox validation and release hardening remain. See [docs/ROADMAP.md](docs/ROADMAP.md).
+> Status: pre-alpha. Includes workspace coding tools, test and lint runs, context trimming, bounded task planning, and categorized persistent memory. It can save lessons from finished tasks (with your approval) and reuse them, and `axiom eval` scores it on small coding tasks. Skills, MCP, and release hardening are planned, not implemented. See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Goals
 
@@ -32,6 +32,18 @@ pip install -e .
 ```
 
 Core dependencies are pure Python, so no compiler toolchain is required.
+
+Termux has no container runtime. To use `shell` there, opt in to host execution:
+
+```toml
+[sandbox]
+backend = "host"
+required = false
+```
+
+Host mode is not isolated. Every command still needs approval, and the environment passed to
+commands only carries `PATH`, `HOME`, `LANG`, `TERM`, `TMPDIR`, `PREFIX`, `VIRTUAL_ENV`, and
+`PYTHONPATH`, so API keys are not exposed.
 
 ## Configuration
 

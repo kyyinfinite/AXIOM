@@ -4,7 +4,7 @@ import json
 import os
 import re
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -216,6 +216,40 @@ class SessionStore:
         with self._connection() as connection:
             cursor = connection.execute("DELETE FROM memories WHERE id = ?", (memory_id,))
         return cursor.rowcount > 0
+
+    def search_memories_any(
+        self, terms: Sequence[str], limit: int = 5, *, category: str | None = None
+    ) -> list[dict[str, Any]]:
+        quoted = [f'"{term}"' for term in terms if term.isalnum()]
+        if not quoted or limit < 1:
+            return []
+        sql = (
+            "SELECT m.id, m.content, m.tags, m.category, m.created_at, m.updated_at "
+            "FROM memories_fts f JOIN memories m ON m.id = f.rowid WHERE memories_fts MATCH ?"
+        )
+        params: list[Any] = [" OR ".join(quoted)]
+        if category is not None:
+            sql += " AND m.category = ?"
+            params.append(category)
+        sql += " ORDER BY rank LIMIT ?"
+        params.append(limit)
+        with self._connection() as connection:
+            rows = connection.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_memories(
+        self, *, category: str | None = None, limit: int = 50
+    ) -> list[dict[str, Any]]:
+        sql = "SELECT id, content, tags, category, created_at, updated_at FROM memories"
+        params: list[Any] = []
+        if category is not None:
+            sql += " WHERE category = ?"
+            params.append(category)
+        sql += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        with self._connection() as connection:
+            rows = connection.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
 
     def search_memories(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         cleaned = query.strip()

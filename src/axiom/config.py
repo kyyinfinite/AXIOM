@@ -14,9 +14,11 @@ from axiom.errors import ConfigError, ModelRefError
 from axiom.models import ModelRef
 
 PERMISSION_MODES: tuple[str, ...] = ("ask", "auto-edit", "yolo")
+SANDBOX_BACKENDS: tuple[str, ...] = ("container", "host")
+LEARNING_MODES: tuple[str, ...] = ("off", "ask", "auto")
 LOG_LEVELS: tuple[str, ...] = ("DEBUG", "INFO", "WARNING", "ERROR")
 TOP_LEVEL_KEYS = frozenset(
-    {"agent", "permissions", "logging", "network", "tools", "providers", "sandbox"}
+    {"agent", "permissions", "logging", "network", "tools", "providers", "sandbox", "learning"}
 )
 PROVIDER_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 HEADER_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]*$")
@@ -44,6 +46,12 @@ fallback = ["openai/gpt-4o-mini"]
 max_steps = 40
 temperature = 0.2
 system_prompt = ""
+context_tokens = 32000
+
+[learning]
+mode = "ask"
+lessons_in_prompt = 5
+max_lessons = 500
 
 [permissions]
 mode = "ask"
@@ -83,6 +91,7 @@ class AgentConfig:
     max_steps: int = 40
     temperature: float = 0.2
     system_prompt: str = ""
+    context_tokens: int = 32000
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +134,13 @@ class SandboxConfig:
 
 
 @dataclass(frozen=True, slots=True)
+class LearningConfig:
+    mode: str = "ask"
+    lessons_in_prompt: int = 5
+    max_lessons: int = 500
+
+
+@dataclass(frozen=True, slots=True)
 class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
     permissions: PermissionConfig = field(default_factory=PermissionConfig)
@@ -132,6 +148,7 @@ class Config:
     network: NetworkConfig = field(default_factory=NetworkConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     sandbox: SandboxConfig = field(default_factory=SandboxConfig)
+    learning: LearningConfig = field(default_factory=LearningConfig)
     providers: dict[str, ProviderSpec] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -287,13 +304,18 @@ def _build_providers(raw: Mapping[str, Any], environ: Mapping[str, str]) -> dict
 def _build_agent(raw: Mapping[str, Any], providers: Mapping[str, ProviderSpec]) -> AgentConfig:
     section = _section(raw, "agent")
     _check_keys(
-        section, {"model", "fallback", "max_steps", "temperature", "system_prompt"}, "agent"
+        section,
+        {"model", "fallback", "max_steps", "temperature", "system_prompt", "context_tokens"},
+        "agent",
     )
     model = _get(section, "model", str, "", "agent").strip()
     fallback = tuple(_str_list(section, "fallback", "agent"))
     max_steps = _get(section, "max_steps", int, 40, "agent")
     temperature = _get(section, "temperature", float, 0.2, "agent")
     system_prompt = _get(section, "system_prompt", str, "", "agent").strip()
+    context_tokens = _get(section, "context_tokens", int, 32000, "agent")
+    if context_tokens != 0 and not 2000 <= context_tokens <= 4_000_000:
+        raise ConfigError("agent.context_tokens must be 0 or between 2000 and 4000000")
     if not 1 <= max_steps <= 1000:
         raise ConfigError("agent.max_steps must be between 1 and 1000")
     if not 0.0 <= temperature <= 2.0:
@@ -308,6 +330,7 @@ def _build_agent(raw: Mapping[str, Any], providers: Mapping[str, ProviderSpec]) 
         max_steps=max_steps,
         temperature=temperature,
         system_prompt=system_prompt,
+        context_tokens=context_tokens,
     )
 
 
@@ -360,6 +383,21 @@ def _build_tools(raw: Mapping[str, Any]) -> ToolsConfig:
     return ToolsConfig(max_output_chars=limit, timeout_seconds=timeout, max_parallel_tools=parallel)
 
 
+def _build_learning(raw: Mapping[str, Any]) -> LearningConfig:
+    section = _section(raw, "learning")
+    _check_keys(section, {"mode", "lessons_in_prompt", "max_lessons"}, "learning")
+    mode = _get(section, "mode", str, "ask", "learning").strip().lower()
+    in_prompt = _get(section, "lessons_in_prompt", int, 5, "learning")
+    maximum = _get(section, "max_lessons", int, 500, "learning")
+    if mode not in LEARNING_MODES:
+        raise ConfigError(f"learning.mode must be one of: {', '.join(LEARNING_MODES)}")
+    if not 0 <= in_prompt <= 20:
+        raise ConfigError("learning.lessons_in_prompt must be between 0 and 20")
+    if not 10 <= maximum <= 10000:
+        raise ConfigError("learning.max_lessons must be between 10 and 10000")
+    return LearningConfig(mode=mode, lessons_in_prompt=in_prompt, max_lessons=maximum)
+
+
 def _build_sandbox(raw: Mapping[str, Any]) -> SandboxConfig:
     section = _section(raw, "sandbox")
     _check_keys(
@@ -384,8 +422,11 @@ def _build_sandbox(raw: Mapping[str, Any]) -> SandboxConfig:
     memory_mb = _get(section, "memory_mb", int, 1024, "sandbox")
     cpu_limit = _get(section, "cpu_limit", float, 1.0, "sandbox")
     pids_limit = _get(section, "pids_limit", int, 128, "sandbox")
-    if backend != "container":
-        raise ConfigError("sandbox.backend currently supports only 'container'")
+    if backend not in SANDBOX_BACKENDS:
+        allowed = ", ".join(repr(item) for item in SANDBOX_BACKENDS)
+        raise ConfigError(f"sandbox.backend currently supports only {allowed}")
+    if backend == "host" and required:
+        raise ConfigError("sandbox.backend 'host' is not isolated; set sandbox.required = false")
     if not runtime or not image:
         raise ConfigError("sandbox.runtime and sandbox.image must not be empty")
     if not 128 <= memory_mb <= 65536:
@@ -411,6 +452,7 @@ def build_config(raw: Mapping[str, Any], environ: Mapping[str, str] | None = Non
         logging=_build_logging(raw),
         network=_build_network(raw),
         tools=_build_tools(raw),
+        learning=_build_learning(raw),
         sandbox=_build_sandbox(raw),
         providers=providers,
     )

@@ -203,6 +203,7 @@ class InteractiveSession:
                 router,
                 registry=self.registry,
                 approver=self._approve,
+                lessons=True,
             )
             agent.history.extend(self.history)
             with self.renderer.console.status("Waiting for model…", spinner="dots"):

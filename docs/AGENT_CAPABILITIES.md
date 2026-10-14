@@ -13,6 +13,36 @@ This document describes lightweight planning, workspace-confined coding tools, a
 - Workspace paths are checked for traversal and symbolic links. File reads and writes are capped at 1 MB. Patch application rejects stale content.
 - SQLite schema changes are additive; existing memory rows receive category `general` and their original creation timestamp as the update timestamp.
 
+## Context window
+
+`agent.context_tokens` (default 32000, 0 disables) bounds what is sent to the model. When the
+estimated size exceeds it, old tool outputs are truncated first, then whole old turns are
+dropped. The system prompt and the latest user message are always kept, tool calls stay paired
+with their results, and the stored history is not modified.
+
+## Learning
+
+After a run that used at least two tools, the model is asked once for up to three short,
+general lessons. `learning.mode` controls what happens next: `off` skips reflection, `ask`
+(default) asks for approval before each lesson is saved, `auto` saves without asking. Lessons
+are stored as memories in the `lesson` category, filtered for secrets, and de-duplicated.
+
+At the start of each run, up to `learning.lessons_in_prompt` lessons matching the task are added
+to the system prompt as hints. Review or remove them with `axiom memory list --category lesson`
+and `axiom memory delete ID`. The TUI reads lessons but does not save new ones yet.
+
+## Evaluation
+
+`axiom eval [--task NAME] [--lessons/--no-lessons]` runs built-in coding tasks in temporary
+workspaces without the shell tool, scores each by running its tests, and writes a JSON report
+to `~/.axiom/evals`. Running once with `--no-lessons` and once with `--lessons` shows whether
+saved lessons help.
+
+## Running checks
+
+`run_checks` runs pytest, mypy, ruff, or compileall on the host with a reduced environment and
+requires approval. Failures are returned to the model as normal output so it can fix and rerun.
+
 ## CLI memory management
 
 ```bash

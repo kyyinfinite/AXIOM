@@ -10,6 +10,7 @@ from typing import Any, Literal
 from axiom.catalog import ProviderSpec
 from axiom.errors import AuthenticationError, ProviderError, ProviderUnavailableError
 from axiom.models import Message, ToolCall, Usage
+from axiom.providers.streams import closing_stream
 from axiom.providers.transport import (
     HttpError,
     HttpTransport,
@@ -188,9 +189,10 @@ class Provider(ABC):
         while True:
             started = False
             try:
-                async for event in self._stream(request):
-                    started = True
-                    yield event
+                async with closing_stream(self._stream(request)) as events:
+                    async for event in events:
+                        started = True
+                        yield event
                 return
             except ProviderError as exc:
                 if started or not exc.retryable or attempt >= self.retry.max_retries:
@@ -220,8 +222,9 @@ class Provider(ABC):
         self, url: str, headers: Mapping[str, str], payload: Mapping[str, Any]
     ) -> AsyncIterator[str]:
         try:
-            async for data in self.transport.stream_sse(url, headers, payload):
-                yield data
+            async with closing_stream(self.transport.stream_sse(url, headers, payload)) as lines:
+                async for data in lines:
+                    yield data
         except HttpError as exc:
             raise error_from_http(self.name, exc) from exc
         except TransportError as exc:

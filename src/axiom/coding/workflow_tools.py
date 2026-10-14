@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from axiom.coding.checks import check_tools
 from axiom.coding.patchset import FilePatch, apply_patchset, preview_patchset
 from axiom.coding.project_index import index_project
 from axiom.errors import ToolError
@@ -121,4 +122,5 @@ def workflow_tools() -> list[Tool]:
             mutates=True,
             requires_approval=True,
         ),
+        *check_tools(),
     ]

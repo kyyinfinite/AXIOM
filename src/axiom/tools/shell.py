@@ -3,13 +3,11 @@ from __future__ import annotations
 from typing import Any
 
 from axiom.errors import ToolError
-from axiom.execution.sandbox import ContainerSandbox, ExecutionRequest
+from axiom.execution.sandbox import ExecutionRequest, Sandbox
 from axiom.tools.base import Tool, ToolContext
 
 
-async def _run_shell(
-    arguments: dict[str, Any], context: ToolContext, sandbox: ContainerSandbox
-) -> str:
+async def _run_shell(arguments: dict[str, Any], context: ToolContext, sandbox: Sandbox) -> str:
     command = str(arguments.get("command", "")).strip()
     if not command:
         raise ToolError("command must not be empty")
@@ -42,13 +40,18 @@ async def _run_shell(
     return "\n".join(sections)
 
 
-def shell_tool(sandbox: ContainerSandbox) -> Tool:
+def shell_tool(sandbox: Sandbox) -> Tool:
     async def handler(arguments: dict[str, Any], context: ToolContext) -> str:
         return await _run_shell(arguments, context, sandbox)
 
     return Tool(
         name="shell",
-        description="Run a shell command inside the configured isolated container sandbox.",
+        description=(
+            "Run a shell command inside the configured isolated container sandbox."
+            if sandbox.isolated
+            else "Run a shell command directly on the host. NOT isolated; the workspace is only "
+            "the starting directory."
+        ),
         parameters={
             "type": "object",
             "properties": {

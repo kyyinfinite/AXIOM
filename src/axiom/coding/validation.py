@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,6 +48,7 @@ def run_validation(
     *,
     timeout_seconds: float = 60.0,
     max_output_chars: int = 20_000,
+    env: Mapping[str, str] | None = None,
 ) -> ValidationResult:
     command = validate_command(argv)
     if not 1 <= timeout_seconds <= 600:
@@ -66,6 +68,7 @@ def run_validation(
             timeout=timeout_seconds,
             check=False,
             shell=False,
+            env=None if env is None else dict(env),
         )
         return ValidationResult(
             command,

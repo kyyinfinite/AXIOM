@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import difflib
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,7 @@ from axiom.errors import ToolError
 from axiom.tools.base import Tool, ToolContext
 
 MAX_FILE_BYTES = 1_000_000
+MIN_HASH_PREFIX = 12
 MAX_SEARCH_RESULTS = 100
 IGNORED_DIRS = {".git", ".venv", "venv", "__pycache__", ".mypy_cache", ".pytest_cache"}
 
@@ -116,6 +118,10 @@ async def _search_code(arguments: dict[str, Any], context: ToolContext) -> str:
     return "\n".join(matches) if matches else "(no matches)"
 
 
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
 async def _propose_patch(arguments: dict[str, Any], context: ToolContext) -> str:
     relative = str(arguments["path"])
     target = _resolve(context, relative)
@@ -132,7 +138,9 @@ async def _propose_patch(arguments: dict[str, Any], context: ToolContext) -> str
         tofile=f"b/{relative}",
     )
     output = "".join(diff)
-    return output or "No changes proposed."
+    if not output:
+        return "No changes proposed."
+    return f"base_sha256: {_digest(old)}\n{output}"
 
 
 async def _apply_patch(arguments: dict[str, Any], context: ToolContext) -> str:
@@ -142,10 +150,26 @@ async def _apply_patch(arguments: dict[str, Any], context: ToolContext) -> str:
         raise ToolError("symbolic links cannot be patched")
     if not target.exists() or not target.is_file():
         raise ToolError("target file does not exist")
-    expected = str(arguments["expected_content"])
     replacement = str(arguments["new_content"])
     current = _read_text(target)
-    if current != expected:
+    base = arguments.get("base_sha256")
+    expected = arguments.get("expected_content")
+    if base is not None:
+        prefix = str(base).strip().lower()
+        if len(prefix) < MIN_HASH_PREFIX or not _digest(current).startswith(prefix):
+            raise ToolError(
+                "base_sha256 does not match the current file; run propose_patch again "
+                "and use the base_sha256 it returns"
+            )
+    elif expected is None:
+        raise ToolError("provide base_sha256 from propose_patch, or expected_content")
+    elif current != str(expected):
+        if str(expected) == replacement:
+            raise ToolError(
+                "expected_content must be the file's current content before your change, "
+                "but it equals new_content. Run propose_patch and pass the base_sha256 it "
+                "returns instead"
+            )
         raise ToolError("file changed since it was read; re-read and propose a fresh patch")
     if len(replacement.encode("utf-8")) > MAX_FILE_BYTES:
         raise ToolError("replacement exceeds 1000000 bytes")
@@ -210,16 +234,18 @@ def coding_tools() -> list[Tool]:
         ),
         Tool(
             "apply_patch",
-            "Replace a file only if its entire current content matches expected_content. "
+            "Replace a file with new_content. Pass base_sha256 from propose_patch (preferred), "
+            "or expected_content, which must be the file's current content before the change. "
             "Requires owner approval.",
             {
                 "type": "object",
                 "properties": {
                     "path": string,
-                    "expected_content": string,
                     "new_content": string,
+                    "base_sha256": string,
+                    "expected_content": string,
                 },
-                "required": ["path", "expected_content", "new_content"],
+                "required": ["path", "new_content"],
                 "additionalProperties": False,
             },
             _apply_patch,

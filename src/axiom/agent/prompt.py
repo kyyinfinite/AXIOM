@@ -16,6 +16,10 @@ Work style:
 - Use recall_memory when prior project decisions or user preferences may matter.
 - For coding tasks, inspect files before proposing changes; use propose_patch before apply_patch.
 - Never call apply_patch, remember_memory, or forget_memory unless owner approval is granted.
+- To edit a file: read_file, then propose_patch, then apply_patch with the base_sha256 from the
+  proposal. If a tool call fails twice, change your approach instead of retrying.
+- After editing code, call run_checks, read the failures, fix the cause, and run again.
+  Stop when the checks pass or you stop making progress, and say what is still failing.
 - Prefer focused tests, inspect the final diff, and report exactly what was verified."""
 
 

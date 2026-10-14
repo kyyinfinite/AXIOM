@@ -7,6 +7,7 @@ import tempfile
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Protocol
 
 from axiom.errors import ToolError
 
@@ -28,7 +29,15 @@ class ExecutionResult:
     timed_out: bool = False
 
 
+class Sandbox(Protocol):
+    isolated: bool
+
+    async def execute(self, request: ExecutionRequest) -> ExecutionResult: ...
+
+
 class ContainerSandbox:
+    isolated: bool = True
+
     def __init__(
         self,
         workspace: Path,

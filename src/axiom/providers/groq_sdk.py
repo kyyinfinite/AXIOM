@@ -15,6 +15,14 @@ DEFAULT_ROOT = "https://api.groq.com"
 OPENAI_SUFFIX = "/openai/v1"
 
 
+async def _close_resource(resource: Any) -> None:
+    closer = getattr(resource, "close", None)
+    if callable(closer):
+        result = closer()
+        if hasattr(result, "__await__"):
+            await result
+
+
 class GroqSdkProvider(OpenAICompatProvider):
     def __init__(
         self,
@@ -66,16 +74,15 @@ class GroqSdkProvider(OpenAICompatProvider):
         client = self._get_client()
         try:
             stream = await client.chat.completions.create(**payload)
-            async for chunk in stream:
-                yield json.dumps(dump_model(chunk), default=str)
+            try:
+                async for chunk in stream:
+                    yield json.dumps(dump_model(chunk), default=str)
+            finally:
+                await _close_resource(stream)
         except ProviderError:
             raise
         except Exception as exc:
             raise error_from_sdk(self.name, exc) from exc
 
     async def aclose(self) -> None:
-        closer = getattr(self._client, "close", None)
-        if callable(closer):
-            result = closer()
-            if hasattr(result, "__await__"):
-                await result
+        await _close_resource(self._client)

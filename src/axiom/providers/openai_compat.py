@@ -19,6 +19,7 @@ from axiom.providers.base import (
     as_int,
     parse_arguments,
 )
+from axiom.providers.streams import closing_stream
 from axiom.providers.transport import HttpTransport, error_from_payload
 
 STREAM_USAGE_PROVIDERS = frozenset({"openai", "groq", "deepseek"})
@@ -274,12 +275,14 @@ class OpenAICompatProvider(Provider):
             payload = self._payload(request, True)
             started = False
             try:
-                async for data in self._sse(self._url(), self._headers(), payload):
-                    if data.strip() == "[DONE]":
-                        break
-                    started = True
-                    for event in assembler.feed(self._loads(data)):
-                        yield event
+                stream = self._sse(self._url(), self._headers(), payload)
+                async with closing_stream(stream) as chunks:
+                    async for data in chunks:
+                        if data.strip() == "[DONE]":
+                            break
+                        started = True
+                        for event in assembler.feed(self._loads(data)):
+                            yield event
             except InvalidRequestError as exc:
                 if started or attempt >= MAX_ADAPTATIONS or not self._adapt(exc):
                     raise

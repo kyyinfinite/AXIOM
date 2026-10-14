@@ -5,6 +5,7 @@ import json
 import os
 import platform
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +22,7 @@ from axiom.config import LOG_LEVELS, SAMPLE_CONFIG, Config, load_config
 from axiom.diagnose import probe_all
 from axiom.dotenv import load_dotenv
 from axiom.errors import AxiomError, ConfigError
+from axiom.evals import TASKS, EvalResult, run_task
 from axiom.logs import collect_secrets, setup_logging
 from axiom.models import Message, ModelRef, ToolCall, Usage
 from axiom.providers.factory import build_router, resolve_chain
@@ -217,6 +219,8 @@ def _render(event: AgentEvent, router: Router) -> None:
         result = event.tool_result
         preview = result.output.replace("\n", " ")[:200]
         click.echo(f"<- {'error' if result.is_error else 'ok'}: {preview}", err=True)
+    elif event.kind == "lesson":
+        click.echo(f"saved lesson: {event.text}", err=True)
     elif event.kind == "done":
         click.echo()
         usage = event.usage or Usage()
@@ -243,7 +247,9 @@ async def _turn(agent: Agent, router: Router, text: str) -> None:
 async def _run_once(config: Config, text: str, stream: bool) -> None:
     router = build_router(config)
     try:
-        agent = build_agent(config, router, approver=_approve, stream=stream)
+        agent = build_agent(
+            config, router, approver=_approve, stream=stream, lessons=True, learn=True
+        )
         await _turn(agent, router, text)
     finally:
         await router.aclose()
@@ -275,7 +281,9 @@ def chat(ctx: click.Context, stream: bool, session_id: str | None) -> None:
             router = build_router(config)
         except AxiomError as exc:
             raise click.ClickException(str(exc)) from exc
-        agent = build_agent(config, router, approver=_approve, stream=stream)
+        agent = build_agent(
+            config, router, approver=_approve, stream=stream, lessons=True, learn=True
+        )
         store = SessionStore(paths.home_dir() / "sessions.sqlite3") if session_id else None
         if store is not None and session_id is not None:
             agent.history.extend(store.load_messages(session_id))
@@ -366,6 +374,49 @@ def sessions_delete(session_id: str) -> None:
     click.echo(f"deleted session {session_id}")
 
 
+@main.command("eval")
+@click.option("--task", "names", multiple=True, help="Task name to run; repeat for several.")
+@click.option("--lessons/--no-lessons", default=False, help="Inject saved lessons into prompts.")
+@click.pass_context
+def eval_command(ctx: click.Context, names: tuple[str, ...], lessons: bool) -> None:
+    """Run small coding tasks against the configured model and score them with tests."""
+    config = _state(ctx).config
+    known = {task.name for task in TASKS}
+    unknown = sorted(set(names) - known)
+    if unknown:
+        raise click.ClickException(f"unknown task: {', '.join(unknown)}")
+    selected = [task for task in TASKS if not names or task.name in names]
+
+    async def go() -> list[EvalResult]:
+        router = build_router(config)
+        try:
+            return [await run_task(task, config, router, lessons=lessons) for task in selected]
+        except AxiomError as exc:
+            raise click.ClickException(str(exc)) from exc
+        finally:
+            await router.aclose()
+
+    results = asyncio.run(go())
+    for item in results:
+        mark = "pass" if item.passed else "FAIL"
+        click.echo(
+            f"{mark}  {item.task:<22} steps={item.steps:<3} tokens={item.tokens:<7} "
+            f"{item.seconds:.1f}s {item.stop_reason}"
+        )
+    passed = sum(item.passed for item in results)
+    click.echo(f"{passed}/{len(results)} passed (lessons={'on' if lessons else 'off'})")
+    target = paths.home_dir() / "evals"
+    target.mkdir(parents=True, exist_ok=True)
+    report = {
+        "model": config.agent.model,
+        "lessons": lessons,
+        "results": [item.to_dict() for item in results],
+    }
+    file = target / f"{time.strftime('%Y%m%d-%H%M%S')}.json"
+    file.write_text(json.dumps(report, indent=2), encoding="utf-8")
+    click.echo(f"saved {file}", err=True)
+
+
 @main.group("memory")
 def memory_group() -> None:
     """Store and search local notes using SQLite full-text search."""
@@ -391,6 +442,15 @@ def memory_search(query: str, limit: int) -> None:
         click.echo(f"#{item['id']} [{item['category']}] [{item['tags']}] {item['content']}")
     if not results:
         click.echo("no matching memories")
+
+
+@memory_group.command("list")
+@click.option("--category", default=None, help="Only show one category, e.g. lesson.")
+@click.option("--limit", type=click.IntRange(1, 500), default=50)
+def memory_list(category: str | None, limit: int) -> None:
+    store = SessionStore(paths.home_dir() / "sessions.sqlite3")
+    for item in store.list_memories(category=category, limit=limit):
+        click.echo(f"#{item['id']} [{item['category']}] [{item['tags']}] {item['content']}")
 
 
 @memory_group.command("update")

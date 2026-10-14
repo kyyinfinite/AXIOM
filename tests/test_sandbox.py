@@ -23,7 +23,7 @@ def test_sandbox_config_defaults(tmp_path):
 
 def test_invalid_sandbox_config_rejected(tmp_path):
     path = tmp_path / "axiom.toml"
-    path.write_text('[sandbox]\nbackend = "host"\n', encoding="utf-8")
+    path.write_text('[sandbox]\nbackend = "vm"\n', encoding="utf-8")
     with pytest.raises(ConfigError, match="supports only"):
         load_config(config_path=path, environ={"AXIOM_HOME": str(tmp_path)})
 

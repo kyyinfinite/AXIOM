@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from axiom import paths
 from axiom.agent.loop import Agent, Approver
 from axiom.agent.prompt import build_system_prompt
 from axiom.config import Config
-from axiom.execution.sandbox import ContainerSandbox
+from axiom.execution.host import HostSandbox
+from axiom.execution.sandbox import ContainerSandbox, Sandbox
+from axiom.learning import LessonStore, Reflector
 from axiom.providers.router import Router
 from axiom.tools.base import ToolContext, ToolRegistry
 from axiom.tools.builtin import default_registry
@@ -20,6 +23,9 @@ def build_agent(
     approver: Approver | None = None,
     workspace: Path | None = None,
     stream: bool = True,
+    shell: bool = True,
+    lessons: bool = False,
+    learn: bool = False,
 ) -> Agent:
     root = (workspace or Path(config.permissions.workspace)).expanduser().resolve()
     context = ToolContext(
@@ -32,17 +38,28 @@ def build_agent(
         if registry is not None
         else default_registry(include_capability_tools=True, include_workflow_tools=True)
     )
-    if "shell" not in tools:
-        sandbox = ContainerSandbox(
-            root,
-            runtime=config.sandbox.runtime,
-            image=config.sandbox.image,
-            memory_mb=config.sandbox.memory_mb,
-            cpu_limit=config.sandbox.cpu_limit,
-            pids_limit=config.sandbox.pids_limit,
-            network_enabled=config.sandbox.network,
-        )
+    if shell and "shell" not in tools:
+        sandbox: Sandbox
+        if config.sandbox.backend == "host":
+            sandbox = HostSandbox(root)
+        else:
+            sandbox = ContainerSandbox(
+                root,
+                runtime=config.sandbox.runtime,
+                image=config.sandbox.image,
+                memory_mb=config.sandbox.memory_mb,
+                cpu_limit=config.sandbox.cpu_limit,
+                pids_limit=config.sandbox.pids_limit,
+                network_enabled=config.sandbox.network,
+            )
         tools.register(shell_tool(sandbox))
+    settings = config.learning
+    store = LessonStore(
+        paths.home_dir() / "sessions.sqlite3",
+        limit=settings.lessons_in_prompt,
+        max_lessons=settings.max_lessons,
+    )
+    reflect = learn and settings.mode != "off"
     return Agent(
         router,
         tools,
@@ -52,4 +69,7 @@ def build_agent(
         approver=approver,
         stream=stream,
         max_parallel_tools=config.tools.max_parallel_tools,
+        context_tokens=config.agent.context_tokens,
+        lessons=store if lessons else None,
+        learner=Reflector(router, store, settings.mode) if reflect else None,
     )

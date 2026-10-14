@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator, Mapping, Sequence
 from axiom.errors import AllProvidersFailedError, AxiomError, ProviderError
 from axiom.models import Message, ModelRef
 from axiom.providers.base import ChatRequest, ChatResponse, Provider, StreamEvent, ToolSpec
+from axiom.providers.streams import closing_stream
 from axiom.providers.transport import HttpTransport
 
 
@@ -82,11 +83,12 @@ class Router:
             request = self._request(ref, messages, tools, temperature, max_tokens)
             started = False
             try:
-                async for event in self.providers[ref.provider].stream(request):
-                    if not started:
-                        started = True
-                        self.last_used = ref
-                    yield event
+                async with closing_stream(self.providers[ref.provider].stream(request)) as events:
+                    async for event in events:
+                        if not started:
+                            started = True
+                            self.last_used = ref
+                        yield event
                 self.last_used = ref
                 return
             except ProviderError as exc:

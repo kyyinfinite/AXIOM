@@ -129,7 +129,13 @@ def apply_patchset(
         else:
             current = None
         if current != patch.expected_content:
-            raise PatchError(f"file changed since planning: {patch.path}")
+            hint = (
+                "; expected_content equals new_content but must be the current content "
+                "before the change"
+                if patch.expected_content == patch.new_content
+                else ""
+            )
+            raise PatchError(f"file changed since planning: {patch.path}{hint}")
         targets.append((patch, target, current))
 
     applied: list[AppliedChange] = []
