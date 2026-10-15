@@ -30,7 +30,7 @@ def _metadata(text: str, path: Path) -> tuple[str, str, str]:
     end = text.find("\n---\n", 4)
     if end < 0:
         raise SkillError(f"{path}: unterminated YAML frontmatter")
-    header, body = text[4:end], text[end + 5:]
+    header, body = text[4:end], text[end + 5 :]
     fields: dict[str, str] = {}
     for line in header.splitlines():
         if not line.strip() or line.lstrip().startswith("#"):

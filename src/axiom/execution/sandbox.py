@@ -39,12 +39,12 @@ class Sandbox(Protocol):
 def runtime_hint() -> str:
     if is_termux():
         return (
-            "Docker cannot run on Termux. Set [sandbox] backend = \"host\" and "
+            'Docker cannot run on Termux. Set [sandbox] backend = "host" and '
             "required = false in your config (commands then run on this device, "
             "not isolated, and still need your approval)."
         )
     return (
-        "Install the runtime, or set [sandbox] backend = \"host\" and required = false "
+        'Install the runtime, or set [sandbox] backend = "host" and required = false '
         "to run commands on this machine without isolation."
     )
 

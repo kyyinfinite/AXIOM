@@ -247,9 +247,7 @@ class InteractiveSession:
     def _models(self, _: str) -> None:
         models = list(
             dict.fromkeys(
-                model
-                for model in (self.config.agent.model, *self.config.agent.fallback)
-                if model
+                model for model in (self.config.agent.model, *self.config.agent.fallback) if model
             )
         )
         rows = [("-", model) for model in models]
@@ -320,9 +318,7 @@ class InteractiveSession:
                 answer = self._ask(f"Delete memory #{memory_id}? [y/N]")
                 if answer and answer.strip().lower() in {"y", "yes"}:
                     message = (
-                        "Memory deleted."
-                        if self.memory.forget(memory_id)
-                        else "Memory not found."
+                        "Memory deleted." if self.memory.forget(memory_id) else "Memory not found."
                     )
                     self.renderer.system(message)
                 else:

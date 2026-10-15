@@ -175,7 +175,6 @@ class SessionStore:
             cursor = connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         return cursor.rowcount > 0
 
-
     def save_session_summary(self, session_id: str, summary: str) -> None:
         value = summary.strip()
         if not session_id.strip() or not value:

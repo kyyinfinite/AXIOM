@@ -63,7 +63,7 @@ def test_config_defaults_to_antislop(tmp_path):
 
 def test_config_can_disable_skills(tmp_path):
     config_path = tmp_path / "axiom.toml"
-    config_path.write_text('[agent]\nskills = []\n', encoding="utf-8")
+    config_path.write_text("[agent]\nskills = []\n", encoding="utf-8")
     config = load_config(
         config_path=config_path,
         cwd=tmp_path,

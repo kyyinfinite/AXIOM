@@ -98,7 +98,6 @@ class StreamView:
         yield line
 
 
-
 class TerminalRenderer:
     def __init__(self, console: Console | None = None, theme: Theme | None = None) -> None:
         self.console = console or make_console()

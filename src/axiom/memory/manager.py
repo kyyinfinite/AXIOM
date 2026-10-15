@@ -41,10 +41,13 @@ class PromptMemory:
     def relevant(self, task: str) -> list[str]:
         import re
 
-        terms = list(dict.fromkeys(
-            word for word in re.findall(r"\w+", task.lower())
-            if len(word) >= 3 and word.isalnum()
-        ))[:12]
+        terms = list(
+            dict.fromkeys(
+                word
+                for word in re.findall(r"\w+", task.lower())
+                if len(word) >= 3 and word.isalnum()
+            )
+        )[:12]
         items = self.lessons.relevant(task)
         if self.database.exists() and terms:
             manager = MemoryManager(self.database)

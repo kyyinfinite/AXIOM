@@ -40,9 +40,7 @@ def active_ref(config: Config) -> ModelRef | None:
         return None
 
 
-def provider_rows(
-    config: Config, environ: Mapping[str, str] | None = None
-) -> list[ProviderRow]:
+def provider_rows(config: Config, environ: Mapping[str, str] | None = None) -> list[ProviderRow]:
     current = active_ref(config)
     rows: list[ProviderRow] = []
     for name, spec in config.providers.items():
