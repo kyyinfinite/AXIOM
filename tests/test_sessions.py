@@ -71,3 +71,49 @@ def test_database_permissions_are_private_on_posix(tmp_path):
     path = tmp_path / "sessions.sqlite3"
     SessionStore(path)
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_typed_memory_metadata_and_usage_tracking(tmp_path):
+    store = SessionStore(tmp_path / "sessions.sqlite3")
+    memory_id = store.add_memory(
+        "Prefer concise Python comments",
+        category="user",
+        memory_type="preference",
+        source="explicit_correction",
+        confidence=0.9,
+    )
+    rows = store.relevant_memories(["concise", "Python"], limit=5)
+    assert rows[0]["id"] == memory_id
+    assert rows[0]["memory_type"] == "preference"
+    assert rows[0]["source"] == "explicit_correction"
+    assert rows[0]["confidence"] == 0.9
+    assert store.list_memories()[0]["use_count"] == 1
+
+
+def test_typed_memory_rejects_invalid_metadata(tmp_path):
+    store = SessionStore(tmp_path / "sessions.sqlite3")
+    try:
+        store.add_memory("test", memory_type="system_override")
+    except ValueError as exc:
+        assert "unsupported memory type" in str(exc)
+    else:
+        raise AssertionError("unsupported memory type should be rejected")
+
+
+def test_session_summary_round_trip(tmp_path):
+    store = SessionStore(tmp_path / "sessions.sqlite3")
+    store.save_messages("summary-session", [Message.user("build the parser")])
+    store.save_session_summary("summary-session", "Parser design and outstanding tests")
+    assert store.load_session_summary("summary-session") == "Parser design and outstanding tests"
+
+
+def test_memory_consolidation_is_dry_run_by_default(tmp_path):
+    store = SessionStore(tmp_path / "sessions.sqlite3")
+    store.add_memory("Use concise comments", category="style", memory_type="preference")
+    store.add_memory("Use concise comments", category="style", memory_type="preference")
+    planned = store.consolidate_memories()
+    assert planned == {"scanned": 2, "duplicates": 1, "deleted": 0}
+    assert len(store.list_memories()) == 2
+    applied = store.consolidate_memories(dry_run=False)
+    assert applied["deleted"] == 1
+    assert len(store.list_memories()) == 1

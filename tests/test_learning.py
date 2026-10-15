@@ -178,3 +178,12 @@ def test_learning_config(tmp_path):
     path.write_text('[learning]\nmode = "auto"\nlessons_in_prompt = 99\n', encoding="utf-8")
     with pytest.raises(ConfigError, match="lessons_in_prompt"):
         load_config(config_path=path, environ=env)
+
+
+def test_lesson_store_marks_reflections_as_lesson_type(tmp_path):
+    store = LessonStore(tmp_path / "db.sqlite3")
+    memory_id = store.add(LESSON)
+    assert memory_id is not None
+    row = store._manager().store.list_memories(category="lesson")[0]
+    assert row["memory_type"] == "lesson"
+    assert row["source"] == "reflector"

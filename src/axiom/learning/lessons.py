@@ -91,4 +91,7 @@ class LessonStore:
     def add(self, lesson: str) -> int | None:
         if self.is_duplicate(lesson) or len(self.all()) >= self.max_lessons:
             return None
-        return self._manager().remember(lesson, category=CATEGORY, tags="auto")
+        return self._manager().store.add_memory(
+            lesson, tags="auto", category=CATEGORY, memory_type="lesson",
+            source="reflector", confidence=0.75,
+        )

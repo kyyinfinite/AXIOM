@@ -82,3 +82,24 @@ def index_project(workspace: Path, *, max_files: int = 2_000) -> list[ModuleInfo
             )
         )
     return results
+
+
+def render_project_index(workspace: Path, *, max_modules: int = 40, max_chars: int = 6_000) -> str:
+    modules = index_project(workspace)
+    lines = ["Workspace Python index (navigation hints; verify files before editing):"]
+    for module in modules[:max_modules]:
+        definitions = ", ".join(module.definitions[:12]) or "no top-level definitions"
+        imports = ", ".join(module.imports[:6])
+        line = f"- {module.path}: {definitions}"
+        if imports:
+            line += f" | imports: {imports}"
+        if module.parse_error:
+            line += f" | parse issue: {module.parse_error[:100]}"
+        if sum(map(len, lines)) + len(line) + len(lines) > max_chars:
+            lines.append("- Additional modules omitted to keep context bounded.")
+            break
+        lines.append(line)
+    has_omission_note = any("Additional modules omitted" in line for line in lines)
+    if len(modules) > max_modules and not has_omission_note:
+        lines.append(f"- {len(modules) - max_modules} more modules not listed.")
+    return "\n".join(lines)

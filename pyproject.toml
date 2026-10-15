@@ -41,6 +41,7 @@ dev = [
 
 [project.scripts]
 axiom = "axiom.cli:main"
+axagent = "axiom.cli:agent_main"
 
 [tool.hatch.version]
 path = "src/axiom/__init__.py"

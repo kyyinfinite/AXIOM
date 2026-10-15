@@ -12,6 +12,7 @@ from axiom import paths
 from axiom.catalog import PROTOCOLS, ProviderSpec, builtin_providers
 from axiom.errors import ConfigError, ModelRefError
 from axiom.models import ModelRef
+from axiom.termux import is_termux
 
 PERMISSION_MODES: tuple[str, ...] = ("ask", "auto-edit", "yolo")
 SANDBOX_BACKENDS: tuple[str, ...] = ("container", "host")
@@ -27,6 +28,7 @@ FALSE_VALUES = frozenset({"0", "false", "no", "off"})
 
 ENV_OVERRIDES: tuple[tuple[str, str, str, type[Any]], ...] = (
     ("AXIOM_MODEL", "agent", "model", str),
+    ("AXIOM_SKILLS", "agent", "skills", list),
     ("AXIOM_FALLBACK", "agent", "fallback", list),
     ("AXIOM_MAX_STEPS", "agent", "max_steps", int),
     ("AXIOM_TEMPERATURE", "agent", "temperature", float),
@@ -47,6 +49,7 @@ max_steps = 40
 temperature = 0.2
 system_prompt = ""
 context_tokens = 32000
+skills = ["antislop"]
 
 [learning]
 mode = "ask"
@@ -84,6 +87,19 @@ pids_limit = 128
 """
 
 
+TERMUX_SANDBOX = """[sandbox]
+backend = "host"
+required = false
+"""
+
+
+def sample_config(environ: Mapping[str, str] | None = None) -> str:
+    if not is_termux(environ):
+        return SAMPLE_CONFIG
+    head, _, _ = SAMPLE_CONFIG.partition("[sandbox]")
+    return head + TERMUX_SANDBOX
+
+
 @dataclass(frozen=True, slots=True)
 class AgentConfig:
     model: str = ""
@@ -92,6 +108,7 @@ class AgentConfig:
     temperature: float = 0.2
     system_prompt: str = ""
     context_tokens: int = 32000
+    skills: tuple[str, ...] = ("antislop",)
 
 
 @dataclass(frozen=True, slots=True)
@@ -305,7 +322,15 @@ def _build_agent(raw: Mapping[str, Any], providers: Mapping[str, ProviderSpec]) 
     section = _section(raw, "agent")
     _check_keys(
         section,
-        {"model", "fallback", "max_steps", "temperature", "system_prompt", "context_tokens"},
+        {
+            "model",
+            "fallback",
+            "max_steps",
+            "temperature",
+            "system_prompt",
+            "context_tokens",
+            "skills",
+        },
         "agent",
     )
     model = _get(section, "model", str, "", "agent").strip()
@@ -314,6 +339,10 @@ def _build_agent(raw: Mapping[str, Any], providers: Mapping[str, ProviderSpec]) 
     temperature = _get(section, "temperature", float, 0.2, "agent")
     system_prompt = _get(section, "system_prompt", str, "", "agent").strip()
     context_tokens = _get(section, "context_tokens", int, 32000, "agent")
+    skills = tuple(_str_list(section, "skills", "agent")) if "skills" in section else ("antislop",)
+    for skill_name in skills:
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", skill_name):
+            raise ConfigError(f"agent.skills contains invalid skill name: {skill_name!r}")
     if context_tokens != 0 and not 2000 <= context_tokens <= 4_000_000:
         raise ConfigError("agent.context_tokens must be 0 or between 2000 and 4000000")
     if not 1 <= max_steps <= 1000:
@@ -331,6 +360,7 @@ def _build_agent(raw: Mapping[str, Any], providers: Mapping[str, ProviderSpec]) 
         temperature=temperature,
         system_prompt=system_prompt,
         context_tokens=context_tokens,
+        skills=skills,
     )
 
 
@@ -398,7 +428,7 @@ def _build_learning(raw: Mapping[str, Any]) -> LearningConfig:
     return LearningConfig(mode=mode, lessons_in_prompt=in_prompt, max_lessons=maximum)
 
 
-def _build_sandbox(raw: Mapping[str, Any]) -> SandboxConfig:
+def _build_sandbox(raw: Mapping[str, Any], env: Mapping[str, str]) -> SandboxConfig:
     section = _section(raw, "sandbox")
     _check_keys(
         section,
@@ -414,10 +444,13 @@ def _build_sandbox(raw: Mapping[str, Any]) -> SandboxConfig:
         },
         "sandbox",
     )
-    backend = _get(section, "backend", str, "container", "sandbox").strip().lower()
+    termux = is_termux(env)
+    backend = (
+        _get(section, "backend", str, "host" if termux else "container", "sandbox").strip().lower()
+    )
     runtime = _get(section, "runtime", str, "docker", "sandbox").strip()
     image = _get(section, "image", str, "python:3.12-alpine", "sandbox").strip()
-    required = _get(section, "required", bool, True, "sandbox")
+    required = _get(section, "required", bool, not (termux and backend == "host"), "sandbox")
     network = _get(section, "network", bool, False, "sandbox")
     memory_mb = _get(section, "memory_mb", int, 1024, "sandbox")
     cpu_limit = _get(section, "cpu_limit", float, 1.0, "sandbox")
@@ -453,7 +486,7 @@ def build_config(raw: Mapping[str, Any], environ: Mapping[str, str] | None = Non
         network=_build_network(raw),
         tools=_build_tools(raw),
         learning=_build_learning(raw),
-        sandbox=_build_sandbox(raw),
+        sandbox=_build_sandbox(raw, env),
         providers=providers,
     )
 

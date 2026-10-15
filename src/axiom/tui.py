@@ -31,23 +31,25 @@ class TerminalRenderer:
             provider = ModelRef.parse(model).provider if config.agent.model else "not configured"
         except ValueError:
             provider = "invalid model"
-        title = Text("AXIOM", style="bold white")
+        title = Text("⌁ AXagent", style="bold white")
         title.append(f"  v{__version__}", style="dim")
         description = (
-            "[bold]Interactive coding agent[/bold]\n"
+            "[bold]Autonomous Developer Agent[/bold]  [dim]AXIOM engine[/dim]\n"
             f"[dim]Provider[/dim]  {provider}   [dim]Model[/dim]  {model}\n"
             f"[dim]Workspace[/dim]  {Path(config.permissions.workspace).expanduser()}\n"
-            "[dim]AGENT TERMINAL · Enter: submit · /help: commands · "
+            "[dim]AXagent terminal · Enter: submit · /help: commands · "
             "Ctrl+C: cancel/exit · /exit: quit[/dim]"
         )
-        self.console.print(Panel(description, title=title, border_style="blue", padding=(0, 1)))
+        self.console.print(
+            Panel(description, title=title, border_style="bright_cyan", padding=(0, 1))
+        )
 
     def user(self, prompt: str) -> None:
         self.console.print("\n[bold cyan]YOU[/bold cyan]")
         self.console.print(prompt, soft_wrap=True)
 
     def assistant(self, content: str) -> None:
-        self.console.print("\n[bold white]AXIOM[/bold white]")
+        self.console.print("\n[bold bright_cyan]AXagent[/bold bright_cyan]")
         self.console.print(Markdown(content, code_theme="monokai"))
 
     def activity(self, event: AgentEvent) -> None:
@@ -93,9 +95,11 @@ class InteractiveSession:
         self.commands: dict[str, tuple[str, Handler]] = {
             "/help": ("Show available commands", self._help),
             "/clear": ("Clear visible conversation and context", self._clear),
-            "/exit": ("Exit AXIOM", self._exit),
-            "/quit": ("Exit AXIOM", self._exit),
+            "/exit": ("Exit AXagent", self._exit),
+            "/quit": ("Exit AXagent", self._exit),
             "/model": ("Show active provider and model", self._model),
+            "/provider": ("Show provider configuration status", self._provider),
+            "/config": ("Show safe configuration summary", self._config),
             "/models": ("List configured model choices", self._models),
             "/status": ("Show session and workspace status", self._status),
             "/tools": ("List registered tools", self._tools),
@@ -124,6 +128,42 @@ class InteractiveSession:
 
     def _model(self, _: str) -> bool:
         self.renderer.status(f"Provider/model: {self.config.agent.model or 'not configured'}")
+        return True
+
+    def _provider(self, _: str) -> bool:
+        from axiom.catalog import is_ready, resolve_api_key
+
+        model = self.config.agent.model
+        if not model:
+            self.renderer.status("Provider: not configured")
+            return True
+        try:
+            provider_name = ModelRef.parse(model).provider
+            spec = self.config.providers[provider_name]
+        except (ValueError, KeyError):
+            self.renderer.status("Provider: invalid model configuration")
+            return True
+        configured = bool(resolve_api_key(spec))
+        readiness = (
+            "credentials configured"
+            if configured and is_ready(spec)
+            else ("credentials missing or incomplete")
+        )
+        self.renderer.status(f"Provider: {provider_name} · {readiness}")
+        return True
+
+    def _config(self, _: str) -> bool:
+        model = self.config.agent.model or "not configured"
+        workspace = Path(self.config.permissions.workspace).expanduser()
+        content = (
+            f"Model: {model}\n"
+            f"Workspace: {workspace}\n"
+            f"Permission mode: {self.config.permissions.mode}\n"
+            "Credentials: values are never displayed"
+        )
+        self.renderer.console.print(
+            Panel(content, title="AXagent configuration", border_style="dim")
+        )
         return True
 
     def _models(self, _: str) -> bool:
@@ -233,9 +273,16 @@ class InteractiveSession:
         from axiom.security.approval import approval_request
 
         request = approval_request(call, tool)
-        self.renderer.console.print(f"\nApproval required: {request.tool_name}")
-        self.renderer.console.print(request.summary)
-        answer = self.renderer.console.input("Allow this action? [y/N] ").strip().lower()
+        self.renderer.console.print(
+            Panel(
+                f"[bold]Action[/bold]  {request.tool_name}\n"
+                f"[bold]Details[/bold]  {request.summary}\n"
+                f"[dim]Fingerprint[/dim]  {request.action_fingerprint[:16]}",
+                title="APPROVAL REQUIRED",
+                border_style="yellow",
+            )
+        )
+        answer = self.renderer.console.input("[yellow]Allow? [y/N][/yellow] ").strip().lower()
         return answer in {"y", "yes"}
 
 

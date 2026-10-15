@@ -18,7 +18,7 @@ from axiom.agent.events import AgentEvent
 from axiom.agent.factory import build_agent
 from axiom.agent.loop import Agent
 from axiom.catalog import is_ready, resolve_api_key
-from axiom.config import LOG_LEVELS, SAMPLE_CONFIG, Config, load_config
+from axiom.config import LOG_LEVELS, Config, load_config, sample_config
 from axiom.diagnose import probe_all
 from axiom.dotenv import load_dotenv
 from axiom.errors import AxiomError, ConfigError
@@ -322,6 +322,21 @@ def chat(ctx: click.Context, stream: bool, session_id: str | None) -> None:
             runner.run(router.aclose())
 
 
+@main.command("tui")
+@click.pass_context
+def tui_command(ctx: click.Context) -> None:
+    from axiom.tui.app import run_tui
+
+    try:
+        run_tui(ctx)
+    except AxiomError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
+def agent_main() -> None:
+    main(args=[*sys.argv[1:], "tui"], prog_name="axagent")
+
+
 @main.command("tools")
 def tools_command() -> None:
     table = Table(title="tools")
@@ -363,6 +378,49 @@ def sessions_show(session_id: str) -> None:
         click.echo(f"[{message.role}] {message.content}")
         for call in message.tool_calls:
             click.echo(f"  tool call: {call.name} {json.dumps(call.arguments, ensure_ascii=False)}")
+
+
+@sessions_group.command("summarize")
+@click.argument("session_id")
+def sessions_summarize(session_id: str) -> None:
+    store = SessionStore(paths.home_dir() / "sessions.sqlite3")
+    messages = store.load_messages(session_id)
+    if not messages:
+        raise click.ClickException(f"session not found or empty: {session_id}")
+    entries: list[str] = []
+    for message in messages:
+        content = " ".join(message.content.split())
+        if message.role in {"user", "assistant"} and content:
+            label = "User" if message.role == "user" else "Agent"
+            entries.append(f"- {label}: {content[:220]}")
+    summary = "\n".join(entries[-20:])[:6000]
+    if not summary:
+        raise click.ClickException("session has no summarizable text")
+    store.save_session_summary(session_id, summary)
+    click.echo(summary)
+
+
+@main.group("learn")
+def learn_group() -> None:
+    """Review and consolidate locally stored learning data."""
+
+
+@learn_group.command("consolidate")
+@click.option(
+    "--apply",
+    is_flag=True,
+    help="Delete exact duplicate memories after showing the plan.",
+)
+def learn_consolidate(apply: bool) -> None:
+    store = SessionStore(paths.home_dir() / "sessions.sqlite3")
+    result = store.consolidate_memories(dry_run=not apply)
+    action = "deleted" if apply else "would delete"
+    click.echo(
+        f"scanned={result['scanned']} duplicates={result['duplicates']} "
+        f"{action}={result['deleted'] if apply else result['duplicates']}"
+    )
+    if result["duplicates"] and not apply:
+        click.echo("Review this plan, then rerun with --apply to remove exact duplicates.")
 
 
 @sessions_group.command("delete")
@@ -410,6 +468,20 @@ def eval_command(ctx: click.Context, names: tuple[str, ...], lessons: bool) -> N
     report = {
         "model": config.agent.model,
         "lessons": lessons,
+        "metrics": {
+            "task_count": len(results),
+            "passed": passed,
+            "pass_rate": passed / len(results) if results else 0.0,
+            "average_steps": (
+                sum(item.steps for item in results) / len(results) if results else 0.0
+            ),
+            "average_tokens": (
+                sum(item.tokens for item in results) / len(results) if results else 0.0
+            ),
+            "average_seconds": (
+                sum(item.seconds for item in results) / len(results) if results else 0.0
+            ),
+        },
         "results": [item.to_dict() for item in results],
     }
     file = target / f"{time.strftime('%Y%m%d-%H%M%S')}.json"
@@ -500,7 +572,7 @@ def config_init(force: bool) -> None:
     if target.exists() and not force:
         raise click.ClickException(f"{target} already exists, use --force to overwrite")
     paths.ensure_private_dir(target.parent)
-    target.write_text(SAMPLE_CONFIG, encoding="utf-8")
+    target.write_text(sample_config(), encoding="utf-8")
     click.echo(f"written {target}")
 
 

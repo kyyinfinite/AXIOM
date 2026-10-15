@@ -5,10 +5,12 @@ from pathlib import Path
 from axiom import paths
 from axiom.agent.loop import Agent, Approver
 from axiom.agent.prompt import build_system_prompt
+from axiom.coding.project_index import render_project_index
 from axiom.config import Config
 from axiom.execution.host import HostSandbox
 from axiom.execution.sandbox import ContainerSandbox, Sandbox
 from axiom.learning import LessonStore, Reflector
+from axiom.memory.manager import PromptMemory
 from axiom.providers.router import Router
 from axiom.tools.base import ToolContext, ToolRegistry
 from axiom.tools.builtin import default_registry
@@ -60,16 +62,26 @@ def build_agent(
         max_lessons=settings.max_lessons,
     )
     reflect = learn and settings.mode != "off"
+    system_prompt = build_system_prompt(
+        root, config.agent.system_prompt, skills=config.agent.skills
+    )
+    if root.is_dir():
+        try:
+            project_context = render_project_index(root)
+        except (OSError, ValueError):
+            project_context = ""
+        if project_context and len(project_context) <= 6_000:
+            system_prompt = f"{system_prompt}\n\n{project_context}"
     return Agent(
         router,
         tools,
         context,
-        system_prompt=build_system_prompt(root, config.agent.system_prompt),
+        system_prompt=system_prompt,
         max_steps=config.agent.max_steps,
         approver=approver,
         stream=stream,
         max_parallel_tools=config.tools.max_parallel_tools,
         context_tokens=config.agent.context_tokens,
-        lessons=store if lessons else None,
+        lessons=PromptMemory(paths.home_dir() / "sessions.sqlite3", store) if lessons else None,
         learner=Reflector(router, store, settings.mode) if reflect else None,
     )

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Protocol
 
 from axiom.errors import ToolError
+from axiom.termux import is_termux
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,6 +34,19 @@ class Sandbox(Protocol):
     isolated: bool
 
     async def execute(self, request: ExecutionRequest) -> ExecutionResult: ...
+
+
+def runtime_hint() -> str:
+    if is_termux():
+        return (
+            "Docker cannot run on Termux. Set [sandbox] backend = \"host\" and "
+            "required = false in your config (commands then run on this device, "
+            "not isolated, and still need your approval)."
+        )
+    return (
+        "Install the runtime, or set [sandbox] backend = \"host\" and required = false "
+        "to run commands on this machine without isolation."
+    )
 
 
 class ContainerSandbox:
@@ -65,7 +79,8 @@ class ContainerSandbox:
         runtime_path = shutil.which(self.runtime)
         if runtime_path is None:
             raise ToolError(
-                f"sandbox runtime '{self.runtime}' is unavailable; host fallback is disabled"
+                f"sandbox runtime '{self.runtime}' is unavailable; host fallback is disabled. "
+                + runtime_hint()
             )
         relative_cwd = request.cwd.removeprefix("/workspace").lstrip("/")
         cwd = (self.workspace / relative_cwd).resolve()

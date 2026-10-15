@@ -63,13 +63,23 @@ class SessionStore:
                     created_at TEXT NOT NULL,
                     PRIMARY KEY (session_id, sequence)
                 );
+                CREATE TABLE IF NOT EXISTS session_summaries (
+                    session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+                    summary TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 CREATE TABLE IF NOT EXISTS memories (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     content TEXT NOT NULL,
                     tags TEXT NOT NULL DEFAULT '',
                     category TEXT NOT NULL DEFAULT 'general',
                     created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL DEFAULT ''
+                    updated_at TEXT NOT NULL DEFAULT '',
+                    memory_type TEXT NOT NULL DEFAULT 'fact',
+                    confidence REAL NOT NULL DEFAULT 0.7,
+                    source TEXT NOT NULL DEFAULT 'user',
+                    use_count INTEGER NOT NULL DEFAULT 0,
+                    last_used_at TEXT NOT NULL DEFAULT ''
                 );
                 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
                     content, tags, content='memories', content_rowid='id'
@@ -99,10 +109,17 @@ class SessionStore:
                 connection.execute(
                     "ALTER TABLE memories ADD COLUMN category TEXT NOT NULL DEFAULT 'general'"
                 )
-            if "updated_at" not in columns:
-                connection.execute(
-                    "ALTER TABLE memories ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''"
-                )
+            migrations = {
+                "updated_at": "TEXT NOT NULL DEFAULT ''",
+                "memory_type": "TEXT NOT NULL DEFAULT 'fact'",
+                "confidence": "REAL NOT NULL DEFAULT 0.7",
+                "source": "TEXT NOT NULL DEFAULT 'user'",
+                "use_count": "INTEGER NOT NULL DEFAULT 0",
+                "last_used_at": "TEXT NOT NULL DEFAULT ''",
+            }
+            for name, definition in migrations.items():
+                if name not in columns:
+                    connection.execute(f"ALTER TABLE memories ADD COLUMN {name} {definition}")
             connection.execute("UPDATE memories SET updated_at = created_at WHERE updated_at = ''")
 
     def save_messages(self, session_id: str, messages: list[Message]) -> None:
@@ -158,9 +175,76 @@ class SessionStore:
             cursor = connection.execute("DELETE FROM sessions WHERE id = ?", (session_id,))
         return cursor.rowcount > 0
 
-    def add_memory(self, content: str, tags: str = "", *, category: str = "general") -> int:
+
+    def save_session_summary(self, session_id: str, summary: str) -> None:
+        value = summary.strip()
+        if not session_id.strip() or not value:
+            raise ValueError("session id and summary must not be empty")
+        if len(value) > 20_000:
+            raise ValueError("session summary exceeds 20000 characters")
+        now = _now()
+        with self._connection() as connection:
+            exists = connection.execute(
+                "SELECT 1 FROM sessions WHERE id = ?", (session_id,)
+            ).fetchone()
+            if exists is None:
+                raise ValueError("session does not exist")
+            connection.execute(
+                """INSERT INTO session_summaries(session_id, summary, updated_at)
+                   VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET
+                   summary = excluded.summary, updated_at = excluded.updated_at""",
+                (session_id, value, now),
+            )
+
+    def load_session_summary(self, session_id: str) -> str | None:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT summary FROM session_summaries WHERE session_id = ?", (session_id,)
+            ).fetchone()
+        return str(row["summary"]) if row else None
+
+    def consolidate_memories(self, *, dry_run: bool = True, limit: int = 500) -> dict[str, int]:
+        if not 1 <= limit <= 10_000:
+            raise ValueError("limit must be between 1 and 10000")
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT id, content, memory_type, category FROM memories ORDER BY id LIMIT ?",
+                (limit,),
+            ).fetchall()
+            seen: set[tuple[str, str, str]] = set()
+            duplicate_ids: list[int] = []
+            for row in rows:
+                normalized_content = " ".join(str(row["content"]).casefold().split())
+                key = (str(row["memory_type"]), str(row["category"]), normalized_content)
+                if key in seen:
+                    duplicate_ids.append(int(row["id"]))
+                else:
+                    seen.add(key)
+            if duplicate_ids and not dry_run:
+                connection.executemany(
+                    "DELETE FROM memories WHERE id = ?",
+                    [(item,) for item in duplicate_ids],
+                )
+        deleted = 0 if dry_run else len(duplicate_ids)
+        return {"scanned": len(rows), "duplicates": len(duplicate_ids), "deleted": deleted}
+
+    def add_memory(
+        self,
+        content: str,
+        tags: str = "",
+        *,
+        category: str = "general",
+        memory_type: str = "fact",
+        confidence: float = 0.7,
+        source: str = "user",
+    ) -> int:
         value = content.strip()
         category_value = category.strip().lower() or "general"
+        type_value = memory_type.strip().lower() or "fact"
+        if type_value not in {"profile", "preference", "project_fact", "lesson", "episode", "fact"}:
+            raise ValueError("unsupported memory type")
+        if not 0.0 <= confidence <= 1.0:
+            raise ValueError("confidence must be between 0 and 1")
         if not value:
             raise ValueError("memory content must not be empty")
         if len(value) > 20_000:
@@ -170,9 +254,11 @@ class SessionStore:
         now = _now()
         with self._connection() as connection:
             cursor = connection.execute(
-                """INSERT INTO memories(content, tags, category, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?)""",
-                (value, tags.strip(), category_value, now, now),
+                """INSERT INTO memories(
+                       content, tags, category, created_at, updated_at, memory_type,
+                       confidence, source
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (value, tags.strip(), category_value, now, now, type_value, confidence, source),
             )
             if cursor.lastrowid is None:
                 raise RuntimeError("SQLite did not return a memory ID")
@@ -224,7 +310,8 @@ class SessionStore:
         if not quoted or limit < 1:
             return []
         sql = (
-            "SELECT m.id, m.content, m.tags, m.category, m.created_at, m.updated_at "
+            "SELECT m.id, m.content, m.tags, m.category, m.created_at, m.updated_at, "
+            "m.memory_type, m.confidence, m.source, m.use_count, m.last_used_at "
             "FROM memories_fts f JOIN memories m ON m.id = f.rowid WHERE memories_fts MATCH ?"
         )
         params: list[Any] = [" OR ".join(quoted)]
@@ -240,7 +327,10 @@ class SessionStore:
     def list_memories(
         self, *, category: str | None = None, limit: int = 50
     ) -> list[dict[str, Any]]:
-        sql = "SELECT id, content, tags, category, created_at, updated_at FROM memories"
+        sql = (
+            "SELECT id, content, tags, category, created_at, updated_at, memory_type, "
+            "confidence, source, use_count, last_used_at FROM memories"
+        )
         params: list[Any] = []
         if category is not None:
             sql += " WHERE category = ?"
@@ -250,6 +340,18 @@ class SessionStore:
         with self._connection() as connection:
             rows = connection.execute(sql, params).fetchall()
         return [dict(row) for row in rows]
+
+    def relevant_memories(self, terms: Sequence[str], limit: int = 8) -> list[dict[str, Any]]:
+        rows = self.search_memories_any(terms, limit)
+        if not rows:
+            return []
+        ids = [int(row["id"]) for row in rows]
+        with self._connection() as connection:
+            connection.executemany(
+                "UPDATE memories SET use_count = use_count + 1, last_used_at = ? WHERE id = ?",
+                [(_now(), memory_id) for memory_id in ids],
+            )
+        return rows
 
     def search_memories(self, query: str, limit: int = 10) -> list[dict[str, Any]]:
         cleaned = query.strip()
@@ -263,7 +365,8 @@ class SessionStore:
         match_query = " AND ".join(f'"{part}"' for part in terms)
         with self._connection() as connection:
             rows = connection.execute(
-                """SELECT m.id, m.content, m.tags, m.category, m.created_at, m.updated_at
+                """SELECT m.id, m.content, m.tags, m.category, m.created_at, m.updated_at,
+                          m.memory_type, m.confidence, m.source, m.use_count, m.last_used_at
                    FROM memories_fts f JOIN memories m ON m.id = f.rowid
                    WHERE memories_fts MATCH ? ORDER BY rank LIMIT ?""",
                 (match_query, limit),

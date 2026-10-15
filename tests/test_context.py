@@ -121,3 +121,12 @@ def test_agent_sends_fitted_history():
     assert len(sent) < len(agent.history)
     assert sent[-1]["content"] == "now"
     assert sent[0]["role"] == "system"
+
+
+def test_context_compaction_keeps_rolling_summary_of_older_turns():
+    messages = history(30, size=200)
+    fitted = ContextWindow(1800, keep_recent=2, tool_output_chars=300).fit(messages)
+    system = fitted[0].content
+    assert "Earlier context summary" in system
+    assert "User: task" in system
+    assert fitted[-1] == messages[-1]

@@ -61,11 +61,25 @@ class ContextWindow:
         lead = messages[:lead_size]
         blocks = _blocks(messages[lead_size:])
         dropped = 0
+        rolling_summary: list[str] = []
+
+        def summarize(blocks_to_summarize: Sequence[Sequence[Message]]) -> None:
+            for block in blocks_to_summarize:
+                for item in block:
+                    text = " ".join(item.content.split())
+                    if item.role == "user" and text:
+                        rolling_summary.append(f"User: {text[:180]}")
+                    elif item.role == "assistant" and text and not item.tool_calls:
+                        rolling_summary.append(f"Agent: {text[:180]}")
+            del rolling_summary[:-8]
 
         def render() -> list[Message]:
             head = list(lead)
             if dropped and head:
                 note = f"[{dropped} earlier messages were omitted to fit the context window]"
+                if rolling_summary:
+                    summary_text = "\n".join(rolling_summary)
+                    note += "\nEarlier context summary (approximate):\n" + summary_text
                 head[0] = replace(head[0], content=f"{head[0].content}\n\n{note}")
             return head + [item for block in blocks for item in block]
 
@@ -84,6 +98,7 @@ class ContextWindow:
             cut = starts[0] if starts and starts[0] > 0 else (starts[1] if len(starts) > 1 else 0)
             if cut == 0:
                 break
+            summarize(blocks[:cut])
             dropped += sum(len(block) for block in blocks[:cut])
             del blocks[:cut]
 

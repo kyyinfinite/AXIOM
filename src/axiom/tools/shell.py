@@ -4,6 +4,7 @@ from typing import Any
 
 from axiom.errors import ToolError
 from axiom.execution.sandbox import ExecutionRequest, Sandbox
+from axiom.termux import is_termux
 from axiom.tools.base import Tool, ToolContext
 
 
@@ -23,7 +24,7 @@ async def _run_shell(arguments: dict[str, Any], context: ToolContext, sandbox: S
         raise ToolError("cwd does not exist")
     result = await sandbox.execute(
         ExecutionRequest(
-            argv=("/bin/sh", "-lc", command),
+            argv=("/bin/sh", "-c" if is_termux() else "-lc", command),
             cwd="/workspace" if relative == "." else f"/workspace/{relative}",
             timeout_seconds=context.timeout,
             max_output_bytes=context.max_output,

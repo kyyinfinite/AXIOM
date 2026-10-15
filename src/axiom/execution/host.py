@@ -9,6 +9,7 @@ from pathlib import Path
 
 from axiom.errors import ToolError
 from axiom.execution.sandbox import ExecutionRequest, ExecutionResult
+from axiom.termux import TERMUX_ENV, is_termux
 
 SAFE_ENV = (
     "PATH",
@@ -23,8 +24,21 @@ SAFE_ENV = (
 )
 
 
+def _termux_preload(value: str) -> bool:
+    prefix = os.environ.get("PREFIX", "")
+    return bool(prefix) and all(part.startswith(prefix) for part in value.split(":") if part)
+
+
 def scrubbed_env() -> dict[str, str]:
-    return {name: os.environ[name] for name in SAFE_ENV if name in os.environ}
+    env = {name: os.environ[name] for name in SAFE_ENV if name in os.environ}
+    if is_termux():
+        for name in TERMUX_ENV:
+            if name in os.environ:
+                env[name] = os.environ[name]
+        preload = os.environ.get("LD_PRELOAD", "")
+        if preload and _termux_preload(preload):
+            env["LD_PRELOAD"] = preload
+    return env
 
 
 def _executable(argv0: str) -> str:
