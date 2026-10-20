@@ -1,0 +1,90 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "eurus-agent"
+dynamic = ["version"]
+description = "Eurus: provider-agnostic AI coding agent that works your shell, files, skills and MCP tools"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Ripki Dwi Putra" }]
+keywords = ["ai", "agent", "llm", "coding-agent", "cli", "mcp"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development",
+]
+dependencies = [
+    "httpx>=0.27",
+    "click>=8.1",
+    "rich>=13.7",
+    "ddgs>=9.14.0",
+    "trafilatura>=2.2.0",
+    "tzdata>=2025.2",
+]
+
+[project.optional-dependencies]
+groq = ["groq>=0.13"]
+genai = ["google-genai>=1.0"]
+sdk = ["groq>=0.13", "google-genai>=1.0"]
+mcp = ["mcp>=1.9,<2"]
+telegram = ["aiogram>=3.13,<4"]
+documents = ["python-docx>=1.1", "openpyxl>=3.1", "python-pptx>=1.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.6",
+    "mypy>=1.18.2",
+    "aiogram>=3.13,<4",
+    "python-docx>=1.1",
+    "openpyxl>=3.1",
+    "python-pptx>=1.0",
+]
+
+[project.scripts]
+eurus = "eurus.cli:main"
+eurus-tui = "eurus.cli:agent_main"
+
+[tool.hatch.version]
+path = "src/eurus/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/eurus"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"src/eurus/coding/office_tools.py" = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+faulthandler_timeout = 120
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["mcp", "mcp.*", "aiogram", "aiogram.*", "pptx", "pptx.*", "trafilatura", "ddgs"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "eurus.gateway.telegram"
+disallow_untyped_decorators = false
+
