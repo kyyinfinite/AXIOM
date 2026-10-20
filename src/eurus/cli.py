@@ -21,7 +21,7 @@ from eurus.catalog import is_ready, resolve_api_key
 from eurus.config import LOG_LEVELS, Config, load_config, sample_config
 from eurus.diagnose import probe_all
 from eurus.dotenv import load_dotenv
-from eurus.errors import ConfigError, EurusError
+from eurus.errors import EurusError, ConfigError
 from eurus.evals import TASKS, EvalResult, run_task
 from eurus.logs import collect_secrets, setup_logging
 from eurus.mcp.manager import MCPServerConfig, MCPToolManager
