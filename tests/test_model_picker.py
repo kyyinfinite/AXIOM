@@ -192,7 +192,7 @@ def test_banner_shows_at_phone_widths(tmp_path, width):
     console.width = width
     session.renderer.startup(session.config)
     output = console.export_text()
-    assert "EURUS" in output and "EEEE" in output
+    assert "EURUS" in output and "A U T O N O M O U S" in output
     assert all(len(line) <= width for line in output.splitlines())
 
 
