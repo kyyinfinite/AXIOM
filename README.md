@@ -234,6 +234,47 @@ max_output_chars = 20000
 timeout_seconds = 120.0
 ```
 
+## Themes and fonts
+
+Eurus ships with nine color themes: `eurus`, `midnight`, `paper`, `mono`, `nord`, `dracula`, `gruvbox`, `tokyo-night` and `catppuccin`. Switch inside the TUI with `/theme <name>`, preview without switching with `/theme preview <name>`, or set one from the shell with `eurus theme use <name>`. `EURUS_THEME` overrides the saved choice.
+
+Create your own with `/theme new ocean nord` (or `eurus theme new ocean --base nord`). This writes `~/.eurus/themes/ocean.toml`:
+
+```toml
+[meta]
+description = "Deep sea"
+extends = "nord"          # any built-in or custom theme
+
+[colors]
+copper = "#4fb3bf"        # accent: prompt, headings, selection
+background = "#0b1d26"
+
+[style]
+code = "dracula"          # Pygments style for code blocks
+glyphs = "nerd"           # unicode, ascii or nerd
+
+[style.glyph]
+prompt = "❯"              # override single glyphs
+
+[font]
+name = "jetbrains-mono-nerd"
+```
+
+Missing keys are inherited from `extends`. Invalid colors, unknown code styles and malformed glyphs are ignored instead of breaking the UI.
+
+A terminal program cannot change the terminal's font by itself, so Eurus installs the font file for your terminal and tells you what is left to do:
+
+```bash
+eurus font list
+eurus font install jetbrains-mono-nerd     # download a Nerd Font from GitHub
+eurus font install ~/Downloads/My.ttf      # or a local .ttf, .otf or .zip
+eurus font reset
+```
+
+On Termux the font is written to `~/.termux/font.ttf` (the previous one is backed up) and `termux-reload-settings` is run. On Linux and macOS it goes to the user font folder and you select it in the terminal settings. Inside the TUI the same actions are `/font list|install|status|reset`. After installing a Nerd Font, run `/glyphs nerd` to turn on icon glyphs; `/glyphs ascii` and `/glyphs auto` are always available.
+
+On Termux, `/theme termux [name]` also writes `~/.termux/colors.properties` so the whole terminal, not just Eurus, uses the theme.
+
 ## Task execution and verification
 
 Use the bounded orchestration API to run planned steps sequentially, verify each result, retry failures within a fixed budget, and serialize progress for application-managed persistence. The controller does not bypass existing tool approval or workspace boundaries. See [docs/TASK_EXECUTION.md](docs/TASK_EXECUTION.md).

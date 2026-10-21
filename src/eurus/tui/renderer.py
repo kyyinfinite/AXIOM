@@ -15,6 +15,7 @@ from rich.padding import Padding
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
+from rich.theme import Theme as RichTheme
 
 from eurus import __version__
 from eurus.agent.events import AgentEvent
@@ -31,6 +32,7 @@ from eurus.tui.picker import ProviderRow
 from eurus.tui.redact import redact_arguments, redact_text, summarize_arguments
 from eurus.tui.state import AgentState
 from eurus.tui.theme import Theme
+from eurus.tui.themes import PALETTE_KEYS
 
 ColorSystem = Literal["standard", "256", "truecolor"]
 
@@ -49,6 +51,23 @@ SHORTCUTS: tuple[tuple[str, str], ...] = (
 )
 SHELL_PREVIEW_LIMIT = 1500
 ALLOW_ANSWERS = frozenset({"a", "allow", "y", "yes"})
+
+
+def markdown_styles(theme: Theme) -> dict[str, str]:
+    return {
+        "markdown.code": f"bold {theme.copper} on {theme.surface}",
+        "markdown.code_block": f"{theme.text} on {theme.surface}",
+        "markdown.link": f"underline {theme.amber}",
+        "markdown.link_url": f"underline {theme.dim}",
+        "markdown.item.bullet": f"bold {theme.copper}",
+        "markdown.item.number": f"bold {theme.copper}",
+        "markdown.block_quote": f"italic {theme.dim}",
+        "markdown.hr": theme.border,
+        "markdown.h1": f"bold {theme.text}",
+        "markdown.h2": f"bold {theme.copper}",
+        "markdown.h3": f"bold {theme.copper}",
+        "markdown.h4": f"bold {theme.dim}",
+    }
 
 
 def make_console(caps: TerminalCapabilities | None = None) -> Console:
@@ -104,8 +123,17 @@ class TerminalRenderer:
     def __init__(self, console: Console | None = None, theme: Theme | None = None) -> None:
         self.console = console or make_console()
         self.theme = theme or Theme.for_unicode(capabilities_of(self.console).unicode)
+        self._styled = False
+        self.apply_theme(self.theme)
         self._started: dict[str, float] = {}
         self._live: Live | None = None
+
+    def apply_theme(self, theme: Theme) -> None:
+        if self._styled:
+            self.console.pop_theme()
+        self.theme = theme
+        self.console.push_theme(RichTheme(markdown_styles(theme)))
+        self._styled = True
 
     @property
     def width(self) -> int:
@@ -124,7 +152,7 @@ class TerminalRenderer:
         current = Text()
         for key, action in SHORTCUTS:
             item = Text()
-            item.append(key, style=f"bold {self.theme.teal}")
+            item.append(key, style=f"bold {self.theme.copper}")
             item.append(f" {action}", style=self.theme.dim)
             if current.cell_len and current.cell_len + 2 + item.cell_len > self.width:
                 lines.append(current)
@@ -179,7 +207,7 @@ class TerminalRenderer:
 
     def prompt(self, continuation: bool = False) -> Text:
         glyph = self.theme.glyphs.cont if continuation else self.theme.glyphs.prompt
-        return Text(f"{glyph} ", style=f"bold {self.theme.teal}")
+        return Text(f"{glyph} ", style=f"bold {self.theme.copper}")
 
     def ask(self, prompt: Text) -> str:
         if not self.console.is_terminal:
@@ -217,8 +245,10 @@ class TerminalRenderer:
             result.append((part, style))
         return result
 
-    def hint_parts(self, width: int) -> list[tuple[str, str]]:
-        items = (
+    def hint_parts(
+        self, width: int, items: Sequence[tuple[str, str]] | None = None
+    ) -> list[tuple[str, str]]:
+        items = items or (
             ("Enter", "send"),
             ("\\ or Ctrl+J", "newline"),
             ("Tab", "complete"),
@@ -233,7 +263,7 @@ class TerminalRenderer:
                 break
             if result:
                 result.append(("  ", self.theme.dim))
-            result.append((key, self.theme.teal))
+            result.append((key, self.theme.copper))
             result.append((f" {action}", self.theme.dim))
             used += need
         return result
@@ -248,7 +278,7 @@ class TerminalRenderer:
         self.console.print(line)
 
     def menu_prompt(self, label: str) -> Text:
-        return Text(f"{label} ", style=f"bold {self.theme.teal}")
+        return Text(f"{label} ", style=f"bold {self.theme.copper}")
 
     def provider_page(self, rows: Sequence[ProviderRow], active_model: str) -> None:
         grid = Table.grid(padding=(0, 1))
@@ -312,7 +342,7 @@ class TerminalRenderer:
             if info.label and info.label != info.id:
                 name.append(f"\n{info.label}", style=self.theme.dim)
             context = f"{format_tokens(info.context)} ctx" if info.context else ""
-            grid.add_row(str(start + offset), marker, name, context)
+            grid.add_row(str(offset), marker, name, context)
         parts: list[RenderableType] = []
         if active_id:
             parts.append(
@@ -361,7 +391,7 @@ class TerminalRenderer:
         grid.add_column(no_wrap=True, width=1)
         grid.add_column(ratio=1, overflow="fold")
         grid.add_row(
-            Text(self.theme.glyphs.prompt, style=f"bold {self.theme.teal}"),
+            Text(self.theme.glyphs.prompt, style=f"bold {self.theme.copper}"),
             Text(prompt, style=self.theme.text),
         )
         self.console.print(Padding(grid, (0, 1), style=f"on {self.theme.surface}"))
@@ -372,7 +402,7 @@ class TerminalRenderer:
         grid.add_column(no_wrap=True, width=1)
         grid.add_column(ratio=1)
         mark = Text(self.theme.glyphs.spark if label else " ", style=f"bold {self.theme.copper}")
-        grid.add_row(mark, Markdown(content, code_theme="native", hyperlinks=True))
+        grid.add_row(mark, Markdown(content, code_theme=self.theme.code_theme, hyperlinks=True))
         self.console.print(grid)
 
     def system(self, message: str) -> None:
@@ -403,7 +433,7 @@ class TerminalRenderer:
 
     def table(self, title: str, rows: Sequence[tuple[str, str]]) -> None:
         grid = Table.grid(padding=(0, 2))
-        grid.add_column(style=f"bold {self.theme.teal}", no_wrap=True)
+        grid.add_column(style=f"bold {self.theme.copper}", no_wrap=True)
         grid.add_column(overflow="fold")
         for key, value in rows:
             grid.add_row(key, value)
@@ -417,6 +447,55 @@ class TerminalRenderer:
                 padding=(0, 1),
             )
         )
+
+    def theme_preview(self, name: str, theme: Theme) -> None:
+        previous = self.theme
+        self.apply_theme(theme)
+        try:
+            glyphs = theme.glyphs
+            swatches = Table.grid(padding=(0, 2))
+            pair = self.width >= 56
+            for _ in range(2 if pair else 1):
+                swatches.add_column(no_wrap=True)
+            cells = [
+                Text.assemble(
+                    ("\u2588\u2588" if theme.unicode else "##", getattr(theme, key)),
+                    (f" {key:<10}", theme.dim),
+                    (getattr(theme, key), theme.text),
+                )
+                for key in PALETTE_KEYS
+            ]
+            step = 2 if pair else 1
+            for index in range(0, len(cells), step):
+                swatches.add_row(*cells[index : index + step])
+            running = Text(f"  {glyphs.arrow} ", style=theme.steel)
+            running.append("RUNNING ", style=f"bold {theme.steel}")
+            running.append("pytest -q", style=f"bold {theme.text}")
+            results = Text()
+            results.append(f"{glyphs.ok} 12 passed", style=theme.green)
+            results.append("   ")
+            results.append(f"{glyphs.fail} 1 failed", style=theme.red)
+            self.console.print(
+                Panel(
+                    swatches,
+                    title=Text(f"PREVIEW {name}", style=f"bold {theme.copper}"),
+                    title_align="left",
+                    subtitle=Text(f"code: {theme.code_theme}", style=theme.dim),
+                    border_style=theme.border,
+                    box=self.box_style,
+                    padding=(0, 1),
+                )
+            )
+            self.user("Refactor the parser and run the tests")
+            self.assistant(
+                "Updated `parser.py`:\n\n```python\ndef parse(text: str) -> list[str]:\n"
+                "    return text.split()\n```"
+            )
+            self.console.print(running)
+            self.console.print(results)
+            self.warning("Sample warning line")
+        finally:
+            self.apply_theme(previous)
 
     def palette(self, commands: Sequence[Command]) -> None:
         self.table("Commands", [(command.name, command.summary) for command in commands])

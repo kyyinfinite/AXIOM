@@ -133,6 +133,26 @@ def load_art(path: Path = ART_PATH) -> Grid:
     return trim(parse_ansi(source.rstrip("\n")))
 
 
+def hex_rgb(value: str) -> Rgb:
+    digits = value.lstrip("#")
+    return (int(digits[0:2], 16), int(digits[2:4], 16), int(digits[4:6], 16))
+
+
+def tint(grid: Grid, theme: Theme) -> Grid:
+    low, high = hex_rgb(theme.background), hex_rgb(theme.text)
+    result: Grid = []
+    for row in grid:
+        mapped: list[Cell] = []
+        for char, color in row:
+            if color is None:
+                mapped.append((char, None))
+                continue
+            light = (0.299 * color[0] + 0.587 * color[1] + 0.114 * color[2]) / 255
+            mapped.append((char, _sample((low, high), min(light * 1.25, 1.0))))
+        result.append(mapped)
+    return result
+
+
 def art_text(grid: Grid) -> Text:
     lines: list[Text] = []
     for row in grid:
@@ -184,5 +204,5 @@ def header(
     grid = Table.grid(padding=(0, GAP))
     grid.add_column(no_wrap=True)
     grid.add_column(no_wrap=True, vertical="middle")
-    grid.add_row(art_text(placed), block)
+    grid.add_row(art_text(tint(placed, theme)), block)
     return grid

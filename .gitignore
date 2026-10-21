@@ -22,3 +22,7 @@ htmlcov/
 
 EURUS_TEST_REPORT.txt
 EURUS_PYTEST_LIVE.txt
+
+*.bak
+*.prepatch
+*~

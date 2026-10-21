@@ -10,7 +10,10 @@ import click
 
 from eurus.config import Config
 from eurus.tui.commands import COMMANDS
+from eurus.tui.renderer import capabilities_of
 from eurus.tui.session import InteractiveSession
+from eurus.tui.terminal import Recolor, layout_mode, recolor_mode
+from eurus.tui.themes import load_active
 
 if TYPE_CHECKING:
     from eurus.tui.prompt import PromptBox
@@ -64,12 +67,30 @@ def make_prompt_box(session: InteractiveSession) -> PromptBox | None:
             width,
         )
 
-    return PromptBox(renderer.theme, status, renderer.hint_parts, COMMANDS)
+    box = PromptBox(renderer.theme, status, renderer.hint_parts, COMMANDS)
+    session.picker = box
+    return box
 
 
 async def run_interactive(session: InteractiveSession) -> None:
     renderer = session.renderer
     install_completion()
+    renderer.apply_theme(load_active(capabilities_of(renderer.console).unicode))
+    recolor = Recolor(sys.stdout, recolor_mode())
+    session.recolor = recolor
+    workspace_name = Path(session.config.permissions.workspace).expanduser().resolve().name
+    recolor.apply(renderer.theme, f"Eurus - {workspace_name}" if workspace_name else "Eurus")
+    if layout_mode() == "fullscreen" and sys.stdin.isatty() and sys.stdout.isatty():
+        try:
+            from eurus.tui.fullscreen import run_fullscreen
+        except ImportError:
+            renderer.warning("Fullscreen needs prompt_toolkit; using the inline layout.")
+        else:
+            try:
+                await run_fullscreen(session)
+            finally:
+                recolor.restore()
+            return
     renderer.startup(session.config)
     box = make_prompt_box(session)
     interrupts = 0
@@ -103,6 +124,7 @@ async def run_interactive(session: InteractiveSession) -> None:
                 if box is None:
                     raise
                 box = None
+                session.picker = None
                 renderer.warning("Input box failed; falling back to the plain prompt.")
                 continue
             interrupts = 0
@@ -110,6 +132,7 @@ async def run_interactive(session: InteractiveSession) -> None:
     finally:
         await session.close()
         renderer.shutdown()
+        recolor.restore()
 
 
 async def chat_async(ctx: click.Context) -> None:

@@ -23,6 +23,13 @@ COMMANDS: tuple[Command, ...] = (
         "Review and manage saved memories",
         "/memory [list|search|add|edit|delete] ...",
     ),
+    Command(
+        "/theme",
+        "Switch, preview or create color themes",
+        "/theme [name|preview|new|path|termux|reset]",
+    ),
+    Command("/font", "Install a terminal font", "/font [list|install|status|reset]"),
+    Command("/glyphs", "Switch the icon set", "/glyphs [unicode|ascii|nerd|auto]"),
     Command("/sessions", "List saved conversations"),
     Command("/resume", "Resume a saved conversation", "/resume [latest|session-id]"),
     Command("/tools", "List registered tools"),

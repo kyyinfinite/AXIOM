@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 
 from prompt_toolkit import Application
 from prompt_toolkit.application import get_app
@@ -22,11 +22,12 @@ from prompt_toolkit.layout import (
     VSplit,
     Window,
 )
+from prompt_toolkit.layout.containers import AnyContainer
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.styles import Style
 
 from eurus.tui.commands import Command
-from eurus.tui.theme import UNICODE_GLYPHS, Theme
+from eurus.tui.theme import Theme
 
 Parts = Callable[[int], list[tuple[str, str]]]
 
@@ -72,16 +73,23 @@ class PromptBox:
         hint: Parts,
         commands: Iterable[Command],
     ) -> None:
-        self.theme = theme
         self.status = status
         self.hint = hint
         self.completer = SlashCompleter(commands)
         self.history = InMemoryHistory()
-        self.chars = UNICODE_BOX if theme.glyphs is UNICODE_GLYPHS else ASCII_BOX
+        self.apply_theme(theme)
+
+    def apply_theme(self, theme: Theme) -> None:
+        self.theme = theme
+        self.chars = UNICODE_BOX if theme.unicode else ASCII_BOX
         self.style = Style.from_dict(
             {
                 "border": f"fg:{theme.border}",
-                "glyph": f"bold fg:{theme.teal}",
+                "glyph": f"bold fg:{theme.copper}",
+                "dim": f"fg:{theme.dim}",
+                "key": f"bold fg:{theme.copper}",
+                "title": f"bold fg:{theme.copper}",
+                "warn": f"fg:{theme.yellow}",
                 "input": f"fg:{theme.text}",
                 "completion-menu": f"bg:{theme.surface}",
                 "completion-menu.completion": f"fg:{theme.text} bg:{theme.surface}",
@@ -103,6 +111,49 @@ class PromptBox:
             ],
             height=1,
         )
+
+    def _frame(self, body: AnyContainer) -> HSplit:
+        side = self.chars[5]
+        middle = VSplit(
+            [
+                Window(width=1, char=side, style="class:border"),
+                VSplit([Window(width=1), body, Window(width=1)]),
+                Window(width=1, char=side, style="class:border"),
+            ]
+        )
+        return HSplit(
+            [
+                self._edge(self.chars[0], self.chars[1]),
+                middle,
+                self._edge(self.chars[2], self.chars[3]),
+            ]
+        )
+
+    def _glyph(self) -> Window:
+        return Window(
+            width=2,
+            height=1,
+            content=FormattedTextControl([("class:glyph", f"{self.theme.glyphs.prompt} ")]),
+            dont_extend_height=True,
+        )
+
+    def _hint_line(self, items: Sequence[tuple[str, str]]) -> Window:
+        def render() -> StyleAndTextTuples:
+            width = terminal_width()
+            out: StyleAndTextTuples = []
+            used = 0
+            for key, action in items:
+                need = len(key) + 1 + len(action) + (2 if out else 0)
+                if used + need > width:
+                    break
+                if out:
+                    out.append(("class:dim", "  "))
+                out.append(("class:key", key))
+                out.append(("class:dim", f" {action}"))
+                used += need
+            return out
+
+        return Window(FormattedTextControl(render), height=1)
 
     def _bindings(self, buffer: Buffer) -> KeyBindings:
         bindings = KeyBindings()
@@ -144,12 +195,6 @@ class PromptBox:
         return bindings
 
     def _layout(self, buffer: Buffer) -> Layout:
-        glyph = Window(
-            width=2,
-            height=1,
-            content=FormattedTextControl([("class:glyph", f"{self.theme.glyphs.prompt} ")]),
-            dont_extend_height=True,
-        )
         field = Window(
             content=BufferControl(buffer=buffer),
             height=Dimension(min=1, max=MAX_INPUT_LINES),
@@ -157,22 +202,7 @@ class PromptBox:
             dont_extend_height=True,
             style="class:input",
         )
-        body = VSplit([Window(width=1), glyph, field, Window(width=1)])
-        side = self.chars[5]
-        middle = VSplit(
-            [
-                Window(width=1, char=side, style="class:border"),
-                body,
-                Window(width=1, char=side, style="class:border"),
-            ]
-        )
-        box = HSplit(
-            [
-                self._edge(self.chars[0], self.chars[1]),
-                middle,
-                self._edge(self.chars[2], self.chars[3]),
-            ]
-        )
+        box = self._frame(VSplit([self._glyph(), field]))
         footer = HSplit(
             [
                 Window(
@@ -211,6 +241,46 @@ class PromptBox:
         app: Application[str] = Application(
             layout=self._layout(buffer),
             key_bindings=self._bindings(buffer),
+            style=self.style,
+            full_screen=False,
+            erase_when_done=True,
+        )
+        return await app.run_async()
+
+    async def confirm(
+        self, question: str, yes: str, no: str, yes_keys: Sequence[str] = ("y",)
+    ) -> bool:
+        body = VSplit(
+            [
+                self._glyph(),
+                Window(
+                    FormattedTextControl([("class:input", question)]),
+                    height=1,
+                    dont_extend_height=True,
+                ),
+            ]
+        )
+        root = HSplit([self._frame(body), self._hint_line([(yes_keys[0], yes), ("Enter", no)])])
+        bindings = KeyBindings()
+
+        def accept(event: KeyPressEvent) -> None:
+            event.app.exit(result=True)
+
+        def reject(event: KeyPressEvent) -> None:
+            event.app.exit(result=False)
+
+        def interrupt(event: KeyPressEvent) -> None:
+            event.app.exit(exception=KeyboardInterrupt)
+
+        for key in yes_keys:
+            bindings.add(key)(accept)
+            bindings.add(key.upper())(accept)
+        for key in ("enter", "escape", "n", "d"):
+            bindings.add(key, eager=key == "escape")(reject)
+        bindings.add("c-c")(interrupt)
+        app: Application[bool] = Application(
+            layout=Layout(root),
+            key_bindings=bindings,
             style=self.style,
             full_screen=False,
             erase_when_done=True,
