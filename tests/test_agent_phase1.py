@@ -196,7 +196,6 @@ def test_api_timeout_does_not_commit_partial_assistant_message():
     asyncio.run(run())
 
 
-
 def test_external_cancellation_closes_active_stream_task():
     async def run():
         started = asyncio.Event()
