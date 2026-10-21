@@ -8,7 +8,7 @@ import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from eurus.agent.context import ContextEngine, ContextWindow, ExtractiveContextEngine
 from eurus.agent.events import AgentEvent
@@ -204,7 +204,7 @@ class Agent:
                     text_task.cancel()
                 if not request_task.done():
                     request_task.cancel()
-                pending = [request_task]
+                pending: list[asyncio.Task[Any]] = [request_task]
                 if text_task is not None:
                     pending.append(text_task)
                 await asyncio.gather(*pending, return_exceptions=True)
