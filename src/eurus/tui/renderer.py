@@ -349,7 +349,8 @@ class TerminalRenderer:
         self.console.print(Text(status, style=self.theme.dim))
         self.console.print(
             Text(
-                "Type to filter  ·  number select  ·  n/p pages  ·  =id manual  ·  r refresh  ·  b back",
+                "Type to filter  ·  number select  ·  n/p pages  ·  "
+                "=id manual  ·  r refresh  ·  b back",
                 style=self.theme.dim,
             )
         )

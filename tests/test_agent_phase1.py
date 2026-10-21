@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 from pathlib import Path
 
 from eurus.agent.loop import Agent, IterationBudget
@@ -195,7 +196,6 @@ def test_api_timeout_does_not_commit_partial_assistant_message():
     asyncio.run(run())
 
 
-
 def test_external_cancellation_closes_active_stream_task():
     async def run():
         started = asyncio.Event()
@@ -222,10 +222,8 @@ def test_external_cancellation_closes_active_stream_task():
         task = asyncio.create_task(_collect(agent))
         await started.wait()
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
         assert cleaned.is_set()
 
     async def _collect(agent):
