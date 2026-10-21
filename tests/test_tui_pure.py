@@ -70,11 +70,42 @@ def test_command_resolution():
     assert "/status" in [c.name for c in suggest("/staus")]
 
 
-def test_banner_rows_have_gradient_and_fit():
-    from eurus.tui.brand import BANNER, BANNER_MIN_WIDTH, banner
+def test_ansi_art_parses_trims_and_scales():
+    from eurus.tui.brand import load_art, parse_ansi, scale, trim
 
-    text = banner()
-    colors = {span.style for span in text.spans if span.style}
-    assert len(colors) > 20
-    assert text.plain.splitlines() == list(BANNER)
-    assert BANNER_MIN_WIDTH <= 46
+    grid = parse_ansi("\x1b[38;2;1;2;3mab\x1b[0m c\n   \n")
+    assert grid[0][0] == ("a", (1, 2, 3)) and grid[0][2] == (" ", None)
+    art = load_art()
+    assert art and len({len(row) for row in art}) == 1
+    assert trim(art) == art
+    small = scale(art, 12)
+    assert len(small) == 12 and len({len(row) for row in small}) == 1
+    assert len(small[0]) < len(art[0])
+
+
+def test_art_placement_respects_terminal_size():
+    from eurus.tui.brand import GAP, TEXT_WIDTH, load_art, place
+
+    art = load_art()
+    assert place(art, 40, 50) is None
+    assert place(art, 120, 16) is None
+    assert place([], 120, 50) is None
+    for width, height in ((80, 40), (100, 30), (120, 60)):
+        placed = place(art, width, height)
+        assert placed is not None
+        assert len(placed[0]) + GAP + TEXT_WIDTH <= width
+        assert len(placed) <= height - 12
+
+
+def test_header_text_only_when_narrow_or_no_color():
+    from rich.console import Console
+
+    from eurus.tui.brand import header
+    from eurus.tui.theme import Theme
+
+    for width, color in ((40, True), (120, False)):
+        console = Console(record=True, width=width, force_terminal=False)
+        console.print(header("1.0", width, 50, Theme(), color))
+        output = console.export_text()
+        assert "EURUS" in output and ("A G E N T" in output or "AGENT" in output)
+        assert all(len(line) <= width for line in output.splitlines())

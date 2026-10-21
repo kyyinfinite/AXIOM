@@ -30,7 +30,10 @@
 
 EURUS is a provider-agnostic AI coding agent designed to work in your terminal. It connects to OpenAI, Anthropic, Gemini, Groq, NVIDIA NIM, and OpenAI-compatible endpoints. It can work with shell commands, files, patches, tests, web research, persistent memory, reusable skills, and optional Model Context Protocol (MCP) integrations.
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 9bd5b79 (style: tui upgrade)
 ## At a glance
 
 - **Provider-agnostic:** switch providers and configure fallback chains.
@@ -54,7 +57,7 @@ When learning is enabled, Eurus can draft a reusable `SKILL.md` after a task inv
 ## Install
 
 ```bash
-git clone https://github.com/<your-username>/eurus.git
+git clone https://github.com/kyyinfinite/eurus.git
 cd eurus
 python -m venv .venv
 source .venv/bin/activate

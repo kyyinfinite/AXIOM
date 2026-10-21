@@ -182,24 +182,19 @@ class Agent:
             messages = self._prompt()
             text_queue: asyncio.Queue[str] = asyncio.Queue()
             request_task = asyncio.create_task(self._request_model(messages, specs, text_queue))
-            text_task: asyncio.Task[str] | None = None
+            while not request_task.done():
+                text_task = asyncio.create_task(text_queue.get())
+                done, _ = await asyncio.wait(
+                    {request_task, text_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if text_task in done:
+                    yield AgentEvent.text_delta(text_task.result())
+                else:
+                    text_task.cancel()
+                    await asyncio.gather(text_task, return_exceptions=True)
+            while not text_queue.empty():
+                yield AgentEvent.text_delta(text_queue.get_nowait())
             try:
-                while not request_task.done():
-                    text_task = asyncio.create_task(text_queue.get())
-                    done, _ = await asyncio.wait(
-                        {request_task, text_task},
-                        return_when=asyncio.FIRST_COMPLETED,
-                    )
-                    if text_task in done:
-                        delta = text_task.result()
-                        text_task = None
-                        yield AgentEvent.text_delta(delta)
-                    else:
-                        text_task.cancel()
-                        await asyncio.gather(text_task, return_exceptions=True)
-                        text_task = None
-                while not text_queue.empty():
-                    yield AgentEvent.text_delta(text_queue.get_nowait())
                 parts, calls, finish, usage = request_task.result()
             except AgentInterrupted:
                 yield AgentEvent.finished("interrupted", self.usage)
@@ -207,14 +202,6 @@ class Agent:
             except TimeoutError:
                 yield AgentEvent.finished("timeout", self.usage)
                 return
-            finally:
-                if text_task is not None:
-                    if not text_task.done():
-                        text_task.cancel()
-                    await asyncio.gather(text_task, return_exceptions=True)
-                if not request_task.done():
-                    request_task.cancel()
-                await asyncio.gather(request_task, return_exceptions=True)
             self.usage += usage
             runtime_budget = self.runtime_budget_tracker
             if runtime_budget is not None:

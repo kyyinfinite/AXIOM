@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -10,6 +11,7 @@ from rich.box import ASCII, ROUNDED, Box
 from rich.console import Console, ConsoleOptions, Group, RenderableType, RenderResult
 from rich.live import Live
 from rich.markdown import Markdown
+from rich.padding import Padding
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -20,7 +22,7 @@ from eurus.config import Config
 from eurus.models import ToolCall, ToolResult, Usage
 from eurus.providers.discovery import ModelInfo
 from eurus.security.approval import ApprovalRequest
-from eurus.tui.brand import gradient, header
+from eurus.tui.brand import header
 from eurus.tui.capabilities import ColorLevel, TerminalCapabilities, detect
 from eurus.tui.commands import Command
 from eurus.tui.info import credential_note, describe, shell_label
@@ -122,7 +124,7 @@ class TerminalRenderer:
         current = Text()
         for key, action in SHORTCUTS:
             item = Text()
-            item.append(key, style=f"bold {self.theme.cyan}")
+            item.append(key, style=f"bold {self.theme.teal}")
             item.append(f" {action}", style=self.theme.dim)
             if current.cell_len and current.cell_len + 2 + item.cell_len > self.width:
                 lines.append(current)
@@ -135,13 +137,20 @@ class TerminalRenderer:
 
     def startup(self, config: Config) -> None:
         info = describe(config)
-        unicode = capabilities_of(self.console).unicode
-        self.console.print(header(__version__, self.width, self.theme, unicode))
+        self.console.print(
+            header(
+                __version__,
+                self.width,
+                self.console.height,
+                self.theme,
+                self.console.color_system is not None,
+            )
+        )
         self.console.print()
         grid = Table.grid(padding=(0, 1))
         grid.add_column(style=self.theme.dim, no_wrap=True)
         grid.add_column(overflow="fold")
-        room = max(self.width - 12, 10)
+        room = max(self.width - 18, 10)
         grid.add_row("Model", clip(info.model, room, self.ellipsis))
         provider = (
             info.provider
@@ -153,7 +162,16 @@ class TerminalRenderer:
         grid.add_row("Workspace", shorten_path(workspace, room, self.ellipsis))
         grid.add_row("Skills", ", ".join(config.agent.skills) or "none")
         grid.add_row("Shell", shell_label(config))
-        self.console.print(grid)
+        self.console.print(
+            Panel(
+                grid,
+                title=Text("SESSION", style=f"bold {self.theme.copper}"),
+                title_align="left",
+                border_style=self.theme.border,
+                box=self.box_style,
+                padding=(0, 1),
+            )
+        )
         self.console.print()
         self.console.print(Text("Describe a task, or type / for commands.", style=self.theme.text))
         self.console.print(self.shortcuts())
@@ -161,14 +179,25 @@ class TerminalRenderer:
 
     def prompt(self, continuation: bool = False) -> Text:
         glyph = self.theme.glyphs.cont if continuation else self.theme.glyphs.prompt
-        return Text(f"{glyph} ", style=f"bold {self.theme.cyan}")
+        return Text(f"{glyph} ", style=f"bold {self.theme.teal}")
 
     def ask(self, prompt: Text) -> str:
-        return self.console.input(prompt)
+        if not self.console.is_terminal:
+            return self.console.input(prompt)
+        with self.console.capture() as capture:
+            self.console.print(prompt, end="")
+        safe = re.sub(r"(\x1b\[[0-9;]*m)", "\x01\\1\x02", capture.get())
+        return input(safe)
 
-    def status_bar(
-        self, state: AgentState, model: str, workspace: Path, usage: Usage, retry: bool
-    ) -> None:
+    def status_parts(
+        self,
+        state: AgentState,
+        model: str,
+        workspace: Path,
+        usage: Usage,
+        retry: bool,
+        width: int,
+    ) -> list[tuple[str, str]]:
         dot = self.theme.glyphs.dot
         segments = [
             Segment(f"{dot} {state.value}"),
@@ -180,17 +209,46 @@ class TerminalRenderer:
         if retry:
             segments.append(Segment("/retry"))
         segments.append(Segment("/help"))
-        parts = fit_segments(segments, self.width, " | ")
-        line = Text()
-        for index, part in enumerate(parts):
+        result: list[tuple[str, str]] = []
+        for index, part in enumerate(fit_segments(segments, width, " | ")):
             if index:
-                line.append(" | ", style=self.theme.border)
+                result.append((" | ", self.theme.border))
             style = self.theme.state_style(state) if index == 0 else self.theme.dim
+            result.append((part, style))
+        return result
+
+    def hint_parts(self, width: int) -> list[tuple[str, str]]:
+        items = (
+            ("Enter", "send"),
+            ("\\ or Ctrl+J", "newline"),
+            ("Tab", "complete"),
+            ("Ctrl+C", "clear"),
+            ("Ctrl+D", "exit"),
+        )
+        result: list[tuple[str, str]] = []
+        used = 0
+        for key, action in items:
+            need = len(key) + 1 + len(action) + (2 if result else 0)
+            if used + need > width:
+                break
+            if result:
+                result.append(("  ", self.theme.dim))
+            result.append((key, self.theme.teal))
+            result.append((f" {action}", self.theme.dim))
+            used += need
+        return result
+
+    def status_bar(
+        self, state: AgentState, model: str, workspace: Path, usage: Usage, retry: bool
+    ) -> None:
+        line = Text()
+        for part, style in self.status_parts(state, model, workspace, usage, retry, self.width):
             line.append(part, style=style)
+        self.console.print(Text(self.theme.glyphs.rule * self.width, style=self.theme.border))
         self.console.print(line)
 
     def menu_prompt(self, label: str) -> Text:
-        return Text(f"{label} ", style=f"bold {self.theme.cyan}")
+        return Text(f"{label} ", style=f"bold {self.theme.teal}")
 
     def provider_page(self, rows: Sequence[ProviderRow], active_model: str) -> None:
         grid = Table.grid(padding=(0, 1))
@@ -218,7 +276,7 @@ class TerminalRenderer:
         self.console.print(
             Panel(
                 body,
-                title=Text("PROVIDERS", style=f"bold {self.theme.violet}"),
+                title=Text("PROVIDERS", style=f"bold {self.theme.copper}"),
                 title_align="left",
                 border_style=self.theme.border,
                 box=self.box_style,
@@ -241,19 +299,29 @@ class TerminalRenderer:
         query: str,
         error: str,
     ) -> None:
-        grid = Table.grid(padding=(0, 1))
-        grid.add_column(style=self.theme.dim, justify="right", no_wrap=True)
-        grid.add_column(no_wrap=True)
-        grid.add_column(overflow="fold")
+        grid = Table.grid(padding=(0, 1), expand=True)
+        grid.add_column(width=3, justify="right", style=self.theme.dim, no_wrap=True)
+        grid.add_column(width=2, no_wrap=True)
+        grid.add_column(ratio=1, overflow="fold")
+        grid.add_column(width=14, justify="right", style=self.theme.dim, no_wrap=True)
         dot = self.theme.glyphs.dot
         for offset, info in enumerate(visible, 1):
             active = info.id == active_id
             marker = Text(dot if active else " ", style=self.theme.green)
             name = Text(info.id, style=f"bold {self.theme.green}" if active else self.theme.text)
-            if info.context:
-                name.append(f"  {format_tokens(info.context)}", style=self.theme.dim)
-            grid.add_row(str(offset), marker, name)
+            if info.label and info.label != info.id:
+                name.append(f"\n{info.label}", style=self.theme.dim)
+            context = f"{format_tokens(info.context)} ctx" if info.context else ""
+            grid.add_row(str(start + offset), marker, name, context)
         parts: list[RenderableType] = []
+        if active_id:
+            parts.append(
+                Text.assemble(
+                    ("ACTIVE  ", self.theme.dim),
+                    (active_id, f"bold {self.theme.green}"),
+                )
+            )
+            parts.append(Text())
         if error:
             parts.append(Text(error, style=self.theme.yellow))
         if visible:
@@ -262,39 +330,52 @@ class TerminalRenderer:
             parts.append(Text("No models match this filter.", style=self.theme.dim))
         else:
             parts.append(Text("Type =model-id to enter one manually.", style=self.theme.dim))
-        title = Text(f"{provider.upper()} MODELS", style=f"bold {self.theme.violet}")
+        title = Text(f"{provider.upper()} MODELS", style=f"bold {self.theme.copper}")
         self.console.print(
             Panel(
                 Group(*parts),
                 title=title,
                 title_align="left",
+                subtitle=Text("EURUS MODEL CATALOG", style=self.theme.dim),
+                subtitle_align="right",
                 border_style=self.theme.border,
                 box=self.box_style,
                 padding=(0, 1),
             )
         )
-        status = f"page {page + 1}/{pages} | {total} models"
+        status = f"{total} models  |  page {page + 1}/{pages}"
         if query:
-            status += f" | filter: {clip(query, 16, self.ellipsis)}"
+            status += f"  |  filter: {clip(query, 20, self.ellipsis)}"
         self.console.print(Text(status, style=self.theme.dim))
         self.console.print(
             Text(
-                "number select | n/p page | text filter | =id manual | r refresh | b back | q quit",
+                (
+                    "Type to filter  ·  number select  ·  n/p pages  ·  "
+                    "=id manual  ·  r refresh  ·  b back"
+                ),
                 style=self.theme.dim,
             )
         )
 
     def user(self, prompt: str) -> None:
         self.console.print()
-        label = Text("YOU", style=f"bold {self.theme.cyan}")
-        self.console.print(label)
-        self.console.print(Text(prompt, style=self.theme.text))
+        grid = Table.grid(padding=(0, 1), expand=True)
+        grid.add_column(no_wrap=True, width=1)
+        grid.add_column(ratio=1, overflow="fold")
+        grid.add_row(
+            Text(self.theme.glyphs.prompt, style=f"bold {self.theme.teal}"),
+            Text(prompt, style=self.theme.text),
+        )
+        self.console.print(Padding(grid, (0, 1), style=f"on {self.theme.surface}"))
 
     def assistant(self, content: str, label: bool = True) -> None:
         self.console.print()
-        if label:
-            self.console.print(gradient("Eurus"))
-        self.console.print(Markdown(content, code_theme="monokai"))
+        grid = Table.grid(padding=(0, 1), expand=True)
+        grid.add_column(no_wrap=True, width=1)
+        grid.add_column(ratio=1)
+        mark = Text(self.theme.glyphs.spark if label else " ", style=f"bold {self.theme.copper}")
+        grid.add_row(mark, Markdown(content, code_theme="native", hyperlinks=True))
+        self.console.print(grid)
 
     def system(self, message: str) -> None:
         self.console.print(Text(message, style=self.theme.dim))
@@ -324,7 +405,7 @@ class TerminalRenderer:
 
     def table(self, title: str, rows: Sequence[tuple[str, str]]) -> None:
         grid = Table.grid(padding=(0, 2))
-        grid.add_column(style=f"bold {self.theme.cyan}", no_wrap=True)
+        grid.add_column(style=f"bold {self.theme.teal}", no_wrap=True)
         grid.add_column(overflow="fold")
         for key, value in rows:
             grid.add_row(key, value)
@@ -344,13 +425,13 @@ class TerminalRenderer:
 
     def tool_started(self, call: ToolCall) -> None:
         self._started[call.id] = time.monotonic()
-        line = Text(f"{self.theme.glyphs.arrow} ", style=self.theme.blue)
-        line.append("RUNNING ", style=f"bold {self.theme.blue}")
+        line = Text(f"  {self.theme.glyphs.arrow} ", style=self.theme.steel)
+        line.append("RUNNING ", style=f"bold {self.theme.steel}")
         line.append(call.name, style=f"bold {self.theme.text}")
         self.console.print(line)
         summary = clip(summarize_arguments(call.arguments), self.width * 2 - 8, self.ellipsis)
         if summary:
-            self.console.print(Text("  " + summary, style=self.theme.dim))
+            self.console.print(Text("    " + summary, style=self.theme.dim))
 
     def tool_finished(self, result: ToolResult) -> None:
         started = self._started.pop(result.call_id, None)
@@ -358,14 +439,14 @@ class TerminalRenderer:
         failed = result.is_error
         glyph = self.theme.glyphs.fail if failed else self.theme.glyphs.ok
         style = self.theme.red if failed else self.theme.green
-        line = Text(f"{glyph} ", style=style)
+        line = Text(f"  {glyph} ", style=style)
         line.append("ERROR " if failed else "DONE ", style=f"bold {style}")
         line.append(result.name, style=f"bold {self.theme.text}")
         line.append(elapsed, style=self.theme.dim)
         self.console.print(line)
         detail = clip(redact_text(result.output), self.width * 2 - 8, self.ellipsis)
         if detail:
-            self.console.print(Text("  " + detail, style=self.theme.dim))
+            self.console.print(Text("    " + detail, style=self.theme.dim))
 
     def activity(self, event: AgentEvent) -> None:
         if event.kind == "tool_call" and event.tool_call is not None:
@@ -423,16 +504,16 @@ class TerminalRenderer:
         self.console.print(
             Panel(
                 body,
-                title=Text("APPROVAL", style=f"bold {self.theme.orange}"),
+                title=Text("APPROVAL", style=f"bold {self.theme.amber}"),
                 title_align="left",
-                border_style=self.theme.orange,
+                border_style=self.theme.amber,
                 box=self.box_style,
                 padding=(0, 1),
             )
         )
 
     def approval_prompt(self) -> Text:
-        return Text("Allow? [a/D] ", style=f"bold {self.theme.orange}")
+        return Text("Allow? [a/D] ", style=f"bold {self.theme.amber}")
 
     def approval_result(self, allowed: bool) -> None:
         if allowed:
@@ -445,7 +526,7 @@ class TerminalRenderer:
         self.warning("Cancelled. Use /retry to resend the same prompt.")
 
     def turn_summary(self, seconds: float, tool_calls: int, usage: Usage) -> None:
-        line = Text("DONE ", style=f"bold {self.theme.green}")
+        line = Text("  DONE ", style=f"bold {self.theme.green}")
         details = [f"{seconds:.1f}s", f"{tool_calls} tool{'s' if tool_calls != 1 else ''}"]
         if usage.total_tokens:
             details.append(f"{format_tokens(usage.total_tokens)} tok")

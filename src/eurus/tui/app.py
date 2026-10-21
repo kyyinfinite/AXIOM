@@ -4,12 +4,16 @@ import asyncio
 import contextlib
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
 from eurus.config import Config
 from eurus.tui.commands import COMMANDS
 from eurus.tui.session import InteractiveSession
+
+if TYPE_CHECKING:
+    from eurus.tui.prompt import PromptBox
 
 
 def install_completion() -> None:
@@ -41,22 +45,48 @@ def read_prompt(session: InteractiveSession) -> str:
         return "\n".join(lines)
 
 
+def make_prompt_box(session: InteractiveSession) -> PromptBox | None:
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):
+        return None
+    try:
+        from eurus.tui.prompt import PromptBox
+    except ImportError:
+        return None
+    renderer = session.renderer
+
+    def status(width: int) -> list[tuple[str, str]]:
+        return renderer.status_parts(
+            session.state,
+            session.config.agent.model,
+            Path(session.config.permissions.workspace).expanduser(),
+            session.usage,
+            bool(session.retry_prompt),
+            width,
+        )
+
+    return PromptBox(renderer.theme, status, renderer.hint_parts, COMMANDS)
+
+
 async def run_interactive(session: InteractiveSession) -> None:
     renderer = session.renderer
     install_completion()
     renderer.startup(session.config)
+    box = make_prompt_box(session)
     interrupts = 0
     try:
         while session.running:
-            renderer.status_bar(
-                session.state,
-                session.config.agent.model,
-                Path(session.config.permissions.workspace).expanduser(),
-                session.usage,
-                bool(session.retry_prompt),
-            )
+            if box is None:
+                renderer.status_bar(
+                    session.state,
+                    session.config.agent.model,
+                    Path(session.config.permissions.workspace).expanduser(),
+                    session.usage,
+                    bool(session.retry_prompt),
+                )
+            else:
+                renderer.console.print()
             try:
-                prompt = read_prompt(session)
+                prompt = await box.ask() if box is not None else read_prompt(session)
             except EOFError:
                 renderer.console.print()
                 renderer.status("Goodbye.")
@@ -68,6 +98,12 @@ async def run_interactive(session: InteractiveSession) -> None:
                     renderer.status("Goodbye.")
                     break
                 renderer.status("Press Ctrl+C again or Ctrl+D to exit.")
+                continue
+            except Exception:
+                if box is None:
+                    raise
+                box = None
+                renderer.warning("Input box failed; falling back to the plain prompt.")
                 continue
             interrupts = 0
             await session.run_cancellable(prompt)

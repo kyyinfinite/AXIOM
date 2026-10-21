@@ -79,7 +79,7 @@ def test_user_and_assistant_render_long_content(tmp_path):
     session.renderer.user("task " * 120)
     session.renderer.assistant("# Result\n\n" + "long response " * 100)
     output = console.export_text()
-    assert "YOU" in output and "Eurus" in output and "Result" in output
+    assert "task" in output and "Result" in output
 
 
 class FakeRouter:

@@ -134,6 +134,39 @@ class InteractiveSession:
             if self._cancel is not None:
                 self._cancel.arm()
 
+    async def _ask_options(self, label: str, options: list[str]) -> str | None:
+        if not self.renderer.console.is_terminal:
+            return self._ask(label)
+        try:
+            from prompt_toolkit import PromptSession
+            from prompt_toolkit.completion import WordCompleter
+            from prompt_toolkit.styles import Style
+        except ImportError:
+            return self._ask(label)
+        if self._cancel is not None:
+            self._cancel.disarm()
+        theme = self.renderer.theme
+        session: PromptSession[str] = PromptSession(
+            completer=WordCompleter(options, ignore_case=True, sentence=True),
+            complete_while_typing=True,
+            style=Style.from_dict(
+                {
+                    "prompt": f"bold fg:{theme.teal}",
+                    "completion-menu": f"bg:{theme.surface}",
+                    "completion-menu.completion": f"fg:{theme.text} bg:{theme.surface}",
+                    "completion-menu.completion.current": f"fg:{theme.surface} bg:{theme.copper}",
+                    "completion-menu.meta.completion": f"fg:{theme.dim} bg:{theme.surface}",
+                }
+            ),
+        )
+        try:
+            return await session.prompt_async([("class:prompt", f"{label} ")])
+        except (KeyboardInterrupt, EOFError):
+            return None
+        finally:
+            if self._cancel is not None:
+                self._cancel.arm()
+
     def _switch(self, text: str) -> bool:
         try:
             ref = ModelRef.parse(text)
@@ -179,7 +212,7 @@ class InteractiveSession:
         while True:
             rows = provider_rows(self.config)
             self.renderer.provider_page(rows, self.config.agent.model)
-            answer = self._ask("provider>")
+            answer = await self._ask_options("provider>", [row.name for row in rows])
             if answer is None:
                 return
             choice = parse_choice(answer, len(rows))
@@ -222,7 +255,7 @@ class InteractiveSession:
                 query,
                 discovery.error,
             )
-            answer = self._ask("model>")
+            answer = await self._ask_options("model>", [info.id for info in models])
             if answer is None:
                 return "quit"
             choice = parse_choice(answer, len(visible))
@@ -242,6 +275,10 @@ class InteractiveSession:
                     return "chosen"
             elif choice.text.startswith("="):
                 if self._switch(f"{provider}/{choice.text[1:].strip()}"):
+                    return "chosen"
+            elif any(info.id.lower() == choice.text.lower() for info in models):
+                selected = next(info for info in models if info.id.lower() == choice.text.lower())
+                if self._switch(f"{provider}/{selected.id}"):
                     return "chosen"
             elif choice.text.isdigit():
                 self.renderer.warning("Number is not on this page.")
