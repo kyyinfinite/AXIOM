@@ -182,18 +182,32 @@ class Agent:
             messages = self._prompt()
             text_queue: asyncio.Queue[str] = asyncio.Queue()
             request_task = asyncio.create_task(self._request_model(messages, specs, text_queue))
-            while not request_task.done():
-                text_task = asyncio.create_task(text_queue.get())
-                done, _ = await asyncio.wait(
-                    {request_task, text_task}, return_when=asyncio.FIRST_COMPLETED
-                )
-                if text_task in done:
-                    yield AgentEvent.text_delta(text_task.result())
-                else:
+            text_task: asyncio.Task[str] | None = None
+            try:
+                while not request_task.done():
+                    text_task = asyncio.create_task(text_queue.get())
+                    done, _ = await asyncio.wait(
+                        {request_task, text_task}, return_when=asyncio.FIRST_COMPLETED
+                    )
+                    if text_task in done:
+                        chunk = text_task.result()
+                        text_task = None
+                        yield AgentEvent.text_delta(chunk)
+                    else:
+                        text_task.cancel()
+                        await asyncio.gather(text_task, return_exceptions=True)
+                        text_task = None
+                while not text_queue.empty():
+                    yield AgentEvent.text_delta(text_queue.get_nowait())
+            finally:
+                if text_task is not None and not text_task.done():
                     text_task.cancel()
-                    await asyncio.gather(text_task, return_exceptions=True)
-            while not text_queue.empty():
-                yield AgentEvent.text_delta(text_queue.get_nowait())
+                if not request_task.done():
+                    request_task.cancel()
+                pending = [request_task]
+                if text_task is not None:
+                    pending.append(text_task)
+                await asyncio.gather(*pending, return_exceptions=True)
             try:
                 parts, calls, finish, usage = request_task.result()
             except AgentInterrupted:
@@ -276,6 +290,9 @@ class Agent:
                 raise AgentInterrupted
             raise TimeoutError
         finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
             if not interrupted.done():
                 interrupted.cancel()
             await asyncio.gather(interrupted, return_exceptions=True)

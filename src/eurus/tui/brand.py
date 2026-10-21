@@ -98,7 +98,9 @@ def trim(grid: Grid) -> Grid:
         return []
     filled = [row for row in rows if not _blank(row)]
     left = min(next(i for i, (char, _) in enumerate(row) if char != " ") for row in filled)
-    right = max(max(i for i, (char, _) in enumerate(row) if char != " ") for row in filled) + 1
+    right = (
+        max(max(i for i, (char, _) in enumerate(row) if char != " ") for row in filled) + 1
+    )
     width = right - left
     trimmed: Grid = []
     for row in rows:

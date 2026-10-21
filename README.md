@@ -30,10 +30,6 @@
 
 EURUS is a provider-agnostic AI coding agent designed to work in your terminal. It connects to OpenAI, Anthropic, Gemini, Groq, NVIDIA NIM, and OpenAI-compatible endpoints. It can work with shell commands, files, patches, tests, web research, persistent memory, reusable skills, and optional Model Context Protocol (MCP) integrations.
 
-<<<<<<< HEAD
-
-=======
->>>>>>> 9bd5b79 (style: tui upgrade)
 ## At a glance
 
 - **Provider-agnostic:** switch providers and configure fallback chains.

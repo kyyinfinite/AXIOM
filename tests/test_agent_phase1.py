@@ -193,3 +193,42 @@ def test_api_timeout_does_not_commit_partial_assistant_message():
         assert [message.role for message in agent.history] == ["system", "user"]
 
     asyncio.run(run())
+
+
+
+def test_external_cancellation_closes_active_stream_task():
+    async def run():
+        started = asyncio.Event()
+        cleaned = asyncio.Event()
+
+        class SlowRouter:
+            async def chat(self, messages, tools=()):
+                raise AssertionError("streaming is expected")
+
+            async def stream(self, messages, tools=()):
+                started.set()
+                try:
+                    yield StreamEvent.text_delta("partial")
+                    await asyncio.Event().wait()
+                finally:
+                    cleaned.set()
+
+        agent = Agent(
+            SlowRouter(),
+            ToolRegistry(),
+            ToolContext(workspace=Path(".")),
+            system_prompt="sys",
+        )
+        task = asyncio.create_task(_collect(agent))
+        await started.wait()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        assert cleaned.is_set()
+
+    async def _collect(agent):
+        return [event async for event in agent.run("go")]
+
+    asyncio.run(run())
