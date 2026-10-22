@@ -86,9 +86,7 @@ class TelegramNotifier:
             self._next_chat_send[chat_id] = scheduled + chat_interval
             if len(self._next_chat_send) > 2048:
                 self._next_chat_send = {
-                    key: value
-                    for key, value in self._next_chat_send.items()
-                    if value > now
+                    key: value for key, value in self._next_chat_send.items() if value > now
                 }
                 self._next_chat_send[chat_id] = scheduled + chat_interval
         delay = scheduled - now
@@ -174,9 +172,7 @@ class BackgroundTaskManager:
             if active_count >= self.max_pending:
                 raise RuntimeError("background task capacity reached")
             state = {
-                "notify_chat_id": (
-                    notify_chat_id if notify_chat_id is not None else int(owner_id)
-                )
+                "notify_chat_id": (notify_chat_id if notify_chat_id is not None else int(owner_id))
             }
             task = self.store.create(owner_id, session_id, objective, state)
             worker = asyncio.create_task(self._execute(task), name=f"eurus-task-{task.task_id}")
@@ -383,9 +379,7 @@ async def run_telegram_polling(
     dispatcher = Dispatcher()
     manager: BackgroundTaskManager
 
-    notifier = TelegramNotifier(
-        lambda chat_id, text: bot.send_message(chat_id=chat_id, text=text)
-    )
+    notifier = TelegramNotifier(lambda chat_id, text: bot.send_message(chat_id=chat_id, text=text))
 
     manager = BackgroundTaskManager(
         store,

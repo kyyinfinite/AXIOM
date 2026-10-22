@@ -32,8 +32,8 @@ class PendingApproval:
 Notifier = Callable[[int, str], Awaitable[None]]
 ApprovalStateCallback = Callable[[str, bool], Awaitable[None]]
 
-current_approval_context: contextvars.ContextVar[ApprovalContext | None] = (
-    contextvars.ContextVar("eurus_approval_context", default=None)
+current_approval_context: contextvars.ContextVar[ApprovalContext | None] = contextvars.ContextVar(
+    "eurus_approval_context", default=None
 )
 
 
