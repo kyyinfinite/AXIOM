@@ -39,6 +39,7 @@ genai = ["google-genai>=1.0"]
 sdk = ["groq>=0.13", "google-genai>=1.0"]
 mcp = ["mcp>=1.9,<2"]
 telegram = ["aiogram>=3.13,<4"]
+browser = ["playwright>=1.50"]
 documents = ["python-docx>=1.1", "openpyxl>=3.1", "python-pptx>=1.0"]
 dev = [
     "pytest>=8.0",
@@ -81,12 +82,17 @@ faulthandler_timeout = 120
 python_version = "3.11"
 strict = true
 files = ["src"]
+mypy_path = "src"
 
 [[tool.mypy.overrides]]
 module = ["mcp", "mcp.*", "aiogram", "aiogram.*", "pptx", "pptx.*", "trafilatura", "ddgs"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = "eurus.gateway.telegram"
+module = "eurus.gateway.telegram.*"
 disallow_untyped_decorators = false
 
+
+[[tool.mypy.overrides]]
+module = "eurus.gateway.telegram.approval"
+follow_imports = "skip"

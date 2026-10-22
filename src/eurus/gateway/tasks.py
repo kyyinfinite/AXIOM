@@ -267,7 +267,8 @@ class TaskStore:
             cursor = db.execute(
                 "UPDATE gateway_tasks SET status='paused', updated_at=?, "
                 "error='process interrupted; review before resubmitting' "
-                "WHERE status IN ('queued','running','recovering')",
+                "WHERE status IN ("
+                "'queued','running','waiting_approval','waiting_input','recovering')",
                 (now,),
             )
         return cursor.rowcount

@@ -3,6 +3,7 @@ from typing import Any
 
 __all__ = [
     "AgentEngine",
+    "AgentRuntime",
     "BudgetSpec",
     "BudgetTracker",
     "ConcurrentRunUpdate",
@@ -21,6 +22,7 @@ __all__ = [
 
 _MODULES = {
     "AgentEngine": "eurus.runtime.engine",
+    "AgentRuntime": "eurus.runtime.application",
     "RunResult": "eurus.runtime.engine",
     "BudgetSpec": "eurus.runtime.budgets",
     "BudgetTracker": "eurus.runtime.budgets",

@@ -522,6 +522,7 @@ def gateway_telegram(ctx: click.Context, max_concurrent: int) -> None:
     from eurus.gateway.security import GatewayAccessPolicy, parse_id_allowlist
     from eurus.gateway.tasks import TaskStore
     from eurus.gateway.telegram import run_telegram_polling, token_from_environment
+    from eurus.gateway.telegram.approval import TelegramApprovalBroker
 
     try:
         token = token_from_environment()
@@ -540,65 +541,86 @@ def gateway_telegram(ctx: click.Context, max_concurrent: int) -> None:
 
     store = TaskStore(paths.home_dir() / "sessions.sqlite3")
     session_store = SessionStore(paths.home_dir() / "sessions.sqlite3")
-    session_locks: dict[str, asyncio.Lock] = {}
 
-    async def runner(task: Any) -> str:
-        lock = session_locks.setdefault(task.session_id, asyncio.Lock())
-        async with lock:
-            router = build_router(config)
-            mcp = MCPToolManager.load(paths.home_dir() / "mcp.json")
-            try:
-                await mcp.connect()
-                registry = default_registry(
-                    include_capability_tools=True, include_workflow_tools=True
-                )
-                mcp.register_tools(registry)
+    async def serve() -> None:
+        from eurus.runtime.application import AgentRuntime
+
+        router = build_router(config)
+        mcp = MCPToolManager.load(paths.home_dir() / "mcp.json")
+        runtime: AgentRuntime | None = None
+        approval_broker = TelegramApprovalBroker(
+            timeout=float(os.environ.get("EURUS_TELEGRAM_APPROVAL_TIMEOUT", "120"))
+        )
+        try:
+            await mcp.connect()
+            registry = default_registry(include_capability_tools=True, include_workflow_tools=True)
+            mcp.register_tools(registry)
+
+            def agent_factory(session_id: str) -> Agent:
                 agent = build_agent(
                     config,
                     router,
                     registry=registry,
-                    approver=lambda call, tool: _deny_remote_approval(call, tool),
+                    approver=approval_broker.approve,
                     stream=False,
                     lessons=True,
                     learn=False,
                 )
-                agent.history.extend(session_store.load_messages(task.session_id))
-                agent.session_id = task.session_id
+                agent.session_id = session_id
                 agent.context_store = session_store
-                output: list[str] = []
-                async for event in agent.run(task.objective):
-                    if event.kind == "text" and event.text:
-                        output.append(event.text)
-                session_store.save_messages(
-                    task.session_id,
-                    agent.history,
-                    project_scope=str(agent.context.workspace.resolve()),
-                )
-                answer = "".join(output).strip()
-                if not answer:
-                    answer = next(
-                        (
-                            message.content
-                            for message in reversed(agent.history)
-                            if message.role == "assistant" and message.content
-                        ),
-                        "Task ended without a verifiable text response.",
-                    )
-                return answer
-            finally:
+                return agent
+
+            async def close_resources() -> None:
                 await mcp.close()
                 await router.aclose()
 
-    try:
-        asyncio.run(
-            run_telegram_polling(
-                token=token,
-                policy=policy,
-                store=store,
-                runner=runner,
-                max_concurrent=max_concurrent,
+            runtime = AgentRuntime(
+                agent_factory,
+                session_store,
+                close_callback=close_resources,
             )
-        )
+
+            async def runner(task: Any) -> str:
+                if runtime is None:
+                    raise RuntimeError("agent runtime is not initialized")
+                output: list[str] = []
+                async for event in runtime.run(task.session_id, task.objective):
+                    if event.kind == "text" and event.text:
+                        output.append(event.text)
+                answer = "".join(output).strip()
+                if not answer:
+                    agent = runtime.agents.get(task.session_id)
+                    if agent is not None:
+                        answer = next(
+                            (
+                                message.content
+                                for message in reversed(agent.history)
+                                if message.role == "assistant" and message.content
+                            ),
+                            "Task ended without a verifiable text response.",
+                        )
+                return answer
+
+            try:
+                await run_telegram_polling(
+                    token=token,
+                    policy=policy,
+                    store=store,
+                    runner=runner,
+                    max_concurrent=max_concurrent,
+                    approval_broker=approval_broker,
+                    event_bridge=runtime.event_bridge,
+                )
+            finally:
+                await runtime.close()
+        except BaseException:
+            if runtime is None:
+                await mcp.close()
+                await router.aclose()
+            raise
+
+    try:
+        asyncio.run(serve())
     except (RuntimeError, EurusError) as exc:
         raise click.ClickException(str(exc)) from exc
 
